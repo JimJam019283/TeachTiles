@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "/usr/bin/g++",
+      "args": [
+        "-g",
+        "-std=c++17",
+        "-o",
+        "${workspaceFolder}/main",
+        "${workspaceFolder}/main.cpp"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"],
+      "detail": "g++ build task for main.cpp"
+    }
+    ,
+    {
+      "label": "build:local-shim",
+      "type": "shell",
+      "command": "/usr/bin/g++",
+      "args": [
+        "-g",
+        "-std=c++17",
+        "-o",
+        "${workspaceFolder}/main",
+        "${workspaceFolder}/src/native_main.cpp",
+        "${workspaceFolder}/main.cpp"
+      ],
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "detail": "Build using native shim for local testing"
+    },
+    {
+      "label": "arduino:compile",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn",
+        "esp32:esp32:esp32",
+        "${workspaceFolder}"
+      ],
+      "problemMatcher": [] ,
+      "detail": "Compile for ESP32 using arduino-cli (requires arduino-cli and ESP32 cores)"
+    },
+    {
+      "label": "arduino:upload",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "upload",
+        "-p",
+        "${input:serialPort}",
+        "--fqbn",
+        "esp32:esp32:esp32",
+        "${workspaceFolder}"
+      ],
+      "problemMatcher": [],
+      "detail": "Upload to ESP32 using arduino-cli (set serialPort input)",
+      "dependsOn": ["arduino:compile"]
+    }
+  ]
+}
+

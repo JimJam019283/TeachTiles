@@ -1,0 +1,64 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug main (lldb)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/main",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "lldb",
+      "preLaunchTask": "build",
+      "logging": {
+        "trace": false,
+        "engineLogging": false
+      }
+    },
+    {
+      "name": "Attach to process",
+      "type": "cppdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}",
+      "program": "${workspaceFolder}/main",
+      "MIMode": "lldb",
+      "logging": {
+        "trace": false
+      }
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/3078565/Documents/GitHub/java-swerve-template/TeachTiles",
+      "program": "/Users/3078565/Documents/GitHub/java-swerve-template/TeachTiles/build/Debug/outDebug"
+    }
+    ,
+    {
+      "name": "Debug (native shim)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/main",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "externalConsole": false,
+      "MIMode": "lldb",
+      "preLaunchTask": "build:local-shim"
+    },
+    {
+      "name": "Debug on ESP32 (placeholder)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/main",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "arduino:compile",
+      "MIMode": "lldb",
+  "logging": { "trace": false }
+    }
+  ]
+}
