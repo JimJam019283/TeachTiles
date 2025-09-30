@@ -19,7 +19,7 @@ struct SerialPort {
         va_list ap; va_start(ap, fmt); vprintf(fmt, ap); va_end(ap);
     }
 };
-
+//Serial Stuff
 SerialPort Serial;
 // Minimal Serial2 stub: no incoming data by default
 struct Serial2_t {
@@ -118,4 +118,12 @@ void loop() {
             }
         }
     }
+}
+int main(int argc, char** argv) {
+    setup();
+    while (true) {
+        loop();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return 0;
 }
