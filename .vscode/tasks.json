@@ -10,14 +10,14 @@
         "-std=c++17",
         "-o",
         "${workspaceFolder}/main",
-        "${workspaceFolder}/main.cpp"
+        "${workspaceFolder}/src/host_main.cpp"
       ],
       "group": {
         "kind": "build",
         "isDefault": true
       },
       "problemMatcher": ["$gcc"],
-      "detail": "g++ build task for main.cpp"
+      "detail": "g++ build task for host_main.cpp (host test)"
     }
     ,
     {
@@ -30,11 +30,11 @@
         "-o",
         "${workspaceFolder}/main",
         "${workspaceFolder}/src/native_main.cpp",
-        "${workspaceFolder}/main.cpp"
+        "${workspaceFolder}/src/host_main.cpp"
       ],
       "group": "build",
       "problemMatcher": ["$gcc"],
-      "detail": "Build using native shim for local testing"
+      "detail": "Build using native shim and host_main for local testing"
     },
     {
       "label": "arduino:compile",

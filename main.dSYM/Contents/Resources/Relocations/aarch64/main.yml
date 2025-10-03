@@ -1,5 +1,5 @@
 ---
 triple:          'arm64-apple-darwin'
-binary-path:     main
+binary-path:     '/Users/3078565/Documents/GitHub/java-swerve-template/TeachTiles/main'
 relocations:     []
 ...

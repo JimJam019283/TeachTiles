@@ -6,8 +6,7 @@
 // Designed for ESP32 WROOM module using Arduino framework.
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
+#include "BluetoothSerial.h"
 
 // WiFi credentials and router IP
 const char* ssid = "YOUR_WIFI_SSID";
@@ -19,8 +18,8 @@ const uint16_t router_port = 5005;
 #define MIDI_RX_PIN 16 // Connect MIDI OUT from piano to this pin
 #define MIDI_BAUDRATE 31250
 
-// UDP object
-WiFiUDP udp;
+// Bluetooth serial (ESP32 Classic SPP)
+BluetoothSerial SerialBT;
 
 // MIDI message parsing state
 enum MidiParseState {
@@ -34,18 +33,6 @@ uint8_t midiStatus = 0;
 uint8_t midiNote = 0;
 uint32_t noteOnTime[128] = {0}; // Store note-on times for each note
 
-void setupWiFi() {
-    Serial.println("Connecting to WiFi...");
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("\nWiFi connected.");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-}
-
 void sendNoteData(uint8_t note, uint32_t duration) {
     // Package: [note, duration (ms, 4 bytes)]
     uint8_t packet[5];
@@ -54,16 +41,19 @@ void sendNoteData(uint8_t note, uint32_t duration) {
     packet[2] = (duration >> 16) & 0xFF;
     packet[3] = (duration >> 8) & 0xFF;
     packet[4] = duration & 0xFF;
-    udp.beginPacket(router_ip, router_port);
-    udp.write(packet, 5);
-    udp.endPacket();
+    // Send the 5-byte packet over Bluetooth SPP
+    SerialBT.write(packet, 5);
 }
 
 void setup() {
     Serial.begin(115200); // Debug output
     Serial2.begin(MIDI_BAUDRATE, SERIAL_8N1, MIDI_RX_PIN, -1); // MIDI UART
-    setupWiFi();
-    udp.begin(12345); // Local UDP port (arbitrary)
+    // Start Bluetooth SPP and advertise device name
+    if (!SerialBT.begin("TeachTile")) {
+        Serial.println("Failed to start Bluetooth");
+    } else {
+        Serial.println("Bluetooth SPP started (TeachTile)");
+    }
     Serial.println("Ready to receive MIDI...");
 }
 
