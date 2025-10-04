@@ -35,7 +35,7 @@
       "request": "launch",
       "args": [],
       "cwd": "/Users/3078565/Documents/GitHub/java-swerve-template/TeachTiles",
-      "program": "/Users/3078565/Documents/GitHub/java-swerve-template/TeachTiles/build/Debug/outDebug"
+      "program": "/Users/3078565/Documents/GitHub/java-swerve-template/TeachTiles/host_main.cpp/Debug/outDebug"
     }
     ,
     {
