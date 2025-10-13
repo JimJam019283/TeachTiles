@@ -65,6 +65,25 @@
       "detail": "Upload to ESP32 using arduino-cli (set serialPort input)",
       "dependsOn": ["arduino:compile"]
     }
+    ,
+    {
+      "label": "arduino:upload:auto",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/upload.sh",
+      "args": [],
+      "problemMatcher": [],
+      "detail": "Auto-detect serial port and upload using bundled arduino-cli",
+      "dependsOn": ["arduino:compile"]
+    }
+  ]
+  ,
+  "inputs": [
+    {
+      "id": "serialPort",
+      "type": "promptString",
+      "description": "Serial port to upload to (e.g. /dev/cu.SLAB_USBtoUART). Leave blank to autodetect.",
+      "default": ""
+    }
   ]
 }
 

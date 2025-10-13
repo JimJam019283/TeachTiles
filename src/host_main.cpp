@@ -1,7 +1,9 @@
 // host_main.cpp
 // Host-friendly version of the Arduino sketch for local testing.
+#ifndef ARDUINO
 #include <cstdint>
 #include <cstdio>
+#include <cstdarg>
 #include <iostream>
 #include <chrono>
 #include <thread>
@@ -35,14 +37,13 @@ uint32_t millis() {
 void delay(unsigned long ms) { std::this_thread::sleep_for(milliseconds(ms)); }
 
 // WiFi/UDP stubs
-// Simulated BluetoothSerial stub for host testing
-struct BluetoothSerialStub {
-    bool begin(const char* name) { std::cout << "(host) Simulated Bluetooth started: " << name << "\n"; return true; }
-    size_t write(const uint8_t* buf, size_t n) { std::cout << "(host) BT packet (" << n << " bytes): ";
-        for (size_t i = 0; i < n; ++i) std::printf("%02X ", buf[i]);
-        std::cout << std::endl; return n;
-    }
-} SerialBT;
+struct WiFiClass { void begin(const char*, const char*) {} int status() { return 3; } std::string localIP() { return "127.0.0.1"; } } WiFi;
+struct WiFiUDP {
+    void begin(unsigned) {}
+    void beginPacket(const char*, uint16_t) {}
+    void write(const uint8_t*, size_t n) { std::cout << "UDP packet (" << n << " bytes)\n"; }
+    void endPacket() {}
+} udp;
 
 // --- Application logic (adapted from original sketch) ---
 const char* ssid = "YOUR_WIFI_SSID";
@@ -60,7 +61,12 @@ uint8_t midiNote = 0;
 uint32_t noteOnTime[128] = {0};
 
 void setupWiFi() {
-    Serial.println("(host) (noop) WiFi setup replaced by Bluetooth in host build");
+    Serial.println("(host) Connecting to WiFi...");
+    WiFi.begin(ssid, password);
+    // pretend connected
+    Serial.println("(host) WiFi connected.");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
 }
 
 void sendNoteData(uint8_t note, uint32_t duration) {
@@ -70,15 +76,17 @@ void sendNoteData(uint8_t note, uint32_t duration) {
     packet[2] = (duration >> 16) & 0xFF;
     packet[3] = (duration >> 8) & 0xFF;
     packet[4] = duration & 0xFF;
-    SerialBT.write(packet, 5);
+    udp.beginPacket(router_ip, router_port);
+    udp.write(packet, 5);
+    udp.endPacket();
 }
 
 void setup() {
     Serial.begin(115200);
     Serial2.begin(MIDI_BAUDRATE, 0, MIDI_RX_PIN, -1);
     setupWiFi();
-    SerialBT.begin("TeachTile-host-sim");
-    Serial.println("(host) Ready to receive MIDI... (Bluetooth simulated)");
+    udp.begin(12345);
+    Serial.println("(host) Ready to receive MIDI...");
 }
 
 void loop() {
@@ -113,6 +121,7 @@ void loop() {
         }
     }
 }
+
 int main(int argc, char** argv) {
     setup();
     while (true) {
@@ -121,3 +130,4 @@ int main(int argc, char** argv) {
     }
     return 0;
 }
+#endif
