@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <chrono>
 #include <cstdio>
+#include <cstdarg>
 
 struct DummySerial {
     void begin(int) {}
