@@ -114,6 +114,7 @@ void sendNoteData(uint8_t note, uint32_t duration) {
     // Package: [note, duration (ms, 4 bytes)]
     uint8_t packet[5];
     packet[0] = note;
+    // pack big-endian (MSB first) — tests expect p[1]<<24 ... p[4]
     packet[1] = (duration >> 24) & 0xFF;
     packet[2] = (duration >> 16) & 0xFF;
     packet[3] = (duration >> 8) & 0xFF;
@@ -165,7 +166,9 @@ void loop() {
 
                     if ((midiStatus & 0xF0) == 0x90 && byte > 0) {
                         // Note ON
-                        noteOnTime[midiNote] = millis();
+                        uint32_t t = millis();
+                        if (t == 0) t = 1; // avoid 0 sentinel
+                        noteOnTime[midiNote] = t;
                         currentPlayingNote = midiNote;
                         currentVelocityVal = byte;
                         currentNoteStart = noteOnTime[midiNote];
@@ -176,9 +179,15 @@ void loop() {
                         uint32_t duration = 0;
                         if (noteOnTime[midiNote] != 0) {
                             duration = now - noteOnTime[midiNote];
+                            if (duration == 0) duration = 1; // ensure non-zero for very short holds
                         }
                         Serial.printf("Signal: true | Note: %s (%d) | Velocity: %d | State: OFF | Duration: %lu ms\n", midiNoteToName(midiNote), midiNote, (unsigned)byte, duration);
-                        sendNoteData(midiNote, duration);
+                        // Only send if we had a prior note-on recorded
+                        if (noteOnTime[midiNote] != 0) {
+                            sendNoteData(midiNote, duration);
+                        } else {
+                            Serial.printf("(info) Ignored OFF for note %d with no prior ON\n", midiNote);
+                        }
                         noteOnTime[midiNote] = 0;
                         // If the note that turned off was the currently tracked one, clear it
                         if (currentPlayingNote == midiNote) {
