@@ -94,6 +94,22 @@ uint8_t midiStatus = 0;
 uint8_t midiNote = 0;
 // Array to store note-on timestamps for each MIDI note (0-127)
 uint32_t noteOnTime[128] = {0};
+// Track signal presence and current playing note for serial output
+uint32_t lastReceivedMillis = 0;
+bool signalPresent = false;
+int currentPlayingNote = -1; // -1 when no note
+uint8_t currentVelocityVal = 0;
+uint32_t currentNoteStart = 0;
+
+// Helper: convert MIDI note number to note name (e.g., 60 -> C4)
+const char* midiNoteToName(uint8_t note) {
+    static char buf[8];
+    static const char* names[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+    int n = note % 12;
+    int octave = (note / 12) - 1; // MIDI octave numbering
+    snprintf(buf, sizeof(buf), "%s%d", names[n], octave);
+    return buf;
+}
 void sendNoteData(uint8_t note, uint32_t duration) {
     // Package: [note, duration (ms, 4 bytes)]
     uint8_t packet[5];
@@ -114,7 +130,18 @@ void setup() {
     } else {
         Serial.println("Bluetooth SPP started (TeachTile)");
     }
+    // Print typical serial monitor startup info for ESP32
+#if defined(ESP32)
+    Serial.println();
+    Serial.println("--- ESP32 Serial Monitor ---");
+    Serial.printf("SDK: %s\n", ESP.getSdkVersion());
+    Serial.printf("Chip: %s (rev %u)\n", ESP.getChipModel(), ESP.getChipRevision());
+    uint64_t mac = ESP.getEfuseMac();
+    Serial.printf("MAC: %012llX\n", mac);
+    Serial.printf("Free heap: %u bytes\n", ESP.getFreeHeap());
+#else
     Serial.println("Ready to receive MIDI...");
+#endif
 }
 
 void loop() {
@@ -132,16 +159,33 @@ void loop() {
                     midiState = WAIT_VELOCITY;
                     break;
                 case WAIT_VELOCITY:
+                    // Update last received time (signal present)
+                    lastReceivedMillis = millis();
+                    signalPresent = true;
+
                     if ((midiStatus & 0xF0) == 0x90 && byte > 0) {
                         // Note ON
                         noteOnTime[midiNote] = millis();
-                        Serial.printf("Note ON: %d\n", midiNote);
+                        currentPlayingNote = midiNote;
+                        currentVelocityVal = byte;
+                        currentNoteStart = noteOnTime[midiNote];
+                        Serial.printf("Signal: true | Note: %s (%d) | Velocity: %d | State: ON\n", midiNoteToName(midiNote), midiNote, currentVelocityVal);
                     } else if (((midiStatus & 0xF0) == 0x80) || ((midiStatus & 0xF0) == 0x90 && byte == 0)) {
                         // Note OFF
-                        uint32_t duration = millis() - noteOnTime[midiNote];
-                        Serial.printf("Note OFF: %d, Duration: %lu ms\n", midiNote, duration);
+                        uint32_t now = millis();
+                        uint32_t duration = 0;
+                        if (noteOnTime[midiNote] != 0) {
+                            duration = now - noteOnTime[midiNote];
+                        }
+                        Serial.printf("Signal: true | Note: %s (%d) | Velocity: %d | State: OFF | Duration: %lu ms\n", midiNoteToName(midiNote), midiNote, (unsigned)byte, duration);
                         sendNoteData(midiNote, duration);
                         noteOnTime[midiNote] = 0;
+                        // If the note that turned off was the currently tracked one, clear it
+                        if (currentPlayingNote == midiNote) {
+                            currentPlayingNote = -1;
+                            currentVelocityVal = 0;
+                            currentNoteStart = 0;
+                        }
                     }
                     midiState = WAIT_NOTE;
                     break;
@@ -151,4 +195,5 @@ void loop() {
             }
         }
     }
+    // No periodic status printing: updates are printed only when incoming MIDI events are parsed
 }
