@@ -8,7 +8,10 @@
 // Include Arduino headers only when building for Arduino/ESP32
 #if defined(ARDUINO) || defined(ESP32)
 #include <Arduino.h>
+#define USE_BT 0 // set to 1 to enable BluetoothSerial (increase flash size)
+#if USE_BT
 #include "BluetoothSerial.h"
+#endif
 #include <stdint.h>
 #else
 // Host (non-Arduino) build: provide minimal stubs so the file can be compiled/run locally
@@ -63,6 +66,79 @@ uint32_t millis() {
 }
 #endif
 
+// forward declaration used by ESP-NOW callback
+const char* midiNoteToName(uint8_t note);
+
+// Transport selection: BT = BluetoothSerial (default), ESPNOW = direct ESP32-to-ESP32, UDP = send over WiFi UDP (useful for testing with a Mac)
+enum TransportMode { TM_BT=0, TM_ESPNOW=1, TM_UDP=2 };
+// Change this to TM_ESPNOW when deploying to two ESP32 devices. Use TM_UDP for Mac testing.
+TransportMode transport = TM_ESPNOW;
+
+#if defined(ESP32)
+#include <WiFi.h>
+#include <esp_wifi.h>
+#include <esp_now.h>
+WiFiUDP _udp;
+
+// Peer MAC for ESP-NOW: we can auto-select the peer by matching our own MAC
+// If you know both MACs in advance, list them here. The code will pick the other one as peer.
+// Replace these two with your devices' MACs if different.
+#if defined(ESP32)
+const uint8_t KNOWN_MAC_A[6] = {0xF4,0x65,0x0B,0xC2,0x4A,0x18}; // device seen on /dev/cu.usbserial-0001
+const uint8_t KNOWN_MAC_B[6] = {0x4C,0xC3,0x82,0x07,0xCC,0x04}; // device seen on /dev/cu.usbserial-11
+uint8_t espnow_peer_mac[6] = {0,0,0,0,0,0};
+#endif
+
+void onDataRecv(const esp_now_recv_info_t* info, const uint8_t *data, int len) {
+    if (len < 5) return;
+    uint8_t note = data[0];
+    uint32_t duration = ((uint32_t)data[1]<<24) | ((uint32_t)data[2]<<16) | ((uint32_t)data[3]<<8) | (uint32_t)data[4];
+    Serial.printf("(ESP-NOW RX) Note: %s (%d) | Duration: %lu ms\n", midiNoteToName(note), note, duration);
+}
+
+void initEspNow() {
+    WiFi.mode(WIFI_STA);
+    esp_wifi_set_promiscuous(false);
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("Error initializing ESP-NOW");
+        return;
+    }
+    esp_now_register_recv_cb(onDataRecv);
+    // Auto-select peer: if espnow_peer_mac is zero, compare our MAC to known list
+    if (memcmp(espnow_peer_mac, (uint8_t[]){0,0,0,0,0,0}, 6) == 0) {
+        // get our MAC as string "xx:xx:xx:xx:xx:xx" then parse
+        String macstr = WiFi.macAddress();
+        uint8_t mymac[6] = {0};
+        int vals[6] = {0};
+        if (sscanf(macstr.c_str(), "%x:%x:%x:%x:%x:%x", &vals[0], &vals[1], &vals[2], &vals[3], &vals[4], &vals[5]) == 6) {
+            for (int i = 0; i < 6; ++i) mymac[i] = (uint8_t)vals[i];
+            if (memcmp(mymac, KNOWN_MAC_A, 6) == 0) {
+                memcpy(espnow_peer_mac, KNOWN_MAC_B, 6);
+            } else if (memcmp(mymac, KNOWN_MAC_B, 6) == 0) {
+                memcpy(espnow_peer_mac, KNOWN_MAC_A, 6);
+            } else {
+                Serial.printf("Unknown board MAC %s; peer must be set manually in code\n", macstr.c_str());
+            }
+        } else {
+            Serial.println("Failed to parse own MAC address");
+        }
+    }
+    if (memcmp(espnow_peer_mac, (uint8_t[]){0,0,0,0,0,0}, 6) != 0) {
+        esp_now_peer_info_t peerInfo = {};
+        memcpy(peerInfo.peer_addr, espnow_peer_mac, 6);
+        peerInfo.channel = 0;
+        peerInfo.encrypt = false;
+        if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+            Serial.println("Failed to add ESP-NOW peer");
+        } else {
+            Serial.println("ESP-NOW peer added");
+        }
+    } else {
+        Serial.println("ESP-NOW peer MAC is all zeros; not adding peer (set espnow_peer_mac in code)");
+    }
+}
+#endif
+
 
 // --- Configuration ---
 // WiFi credentials and router IP
@@ -79,7 +155,9 @@ const uint16_t router_port = 5005;
 #if defined(ESP32)
 #include "HardwareSerial.h"
 // Serial2 instance is provided by the ESP32 Arduino core; don't redefine it here.
+#if USE_BT
 BluetoothSerial SerialBT;
+#endif
 #endif
 
 // MIDI message parsing state
@@ -100,6 +178,9 @@ bool signalPresent = false;
 int currentPlayingNote = -1; // -1 when no note
 uint8_t currentVelocityVal = 0;
 uint32_t currentNoteStart = 0;
+// Periodic status print interval (ms)
+#define STATUS_PRINT_INTERVAL_MS 200
+uint32_t lastStatusPrintMillis = 0;
 
 // Helper: convert MIDI note number to note name (e.g., 60 -> C4)
 const char* midiNoteToName(uint8_t note) {
@@ -119,18 +200,49 @@ void sendNoteData(uint8_t note, uint32_t duration) {
     packet[2] = (duration >> 16) & 0xFF;
     packet[3] = (duration >> 8) & 0xFF;
     packet[4] = duration & 0xFF;
-    // Send the 5-byte packet over Bluetooth SPP (host stub captures this)
+    // Send via selected transport
+    if (transport == TM_BT) {
+#if USE_BT
     SerialBT.write(packet, 5);
+#else
+    Serial.printf("(bt disabled) would send packet for note %d dur %lu\n", packet[0], (unsigned long)duration);
+#endif
+    } else if (transport == TM_ESPNOW) {
+#if defined(ESP32)
+        if (memcmp(espnow_peer_mac, (uint8_t[]){0,0,0,0,0,0}, 6) != 0) {
+            esp_err_t r = esp_now_send(espnow_peer_mac, packet, 5);
+            if (r != ESP_OK) Serial.printf("ESP-NOW send er ror: %d\n", r);
+        } else {
+            Serial.println("ESP-NOW peer not configured; cannot send");
+        }
+#else
+        // Host: fall back to SerialBT
+        SerialBT.write(packet, 5);
+#endif
+    } else if (transport == TM_UDP) {
+#if defined(ESP32)
+        _udp.beginPacket(router_ip, router_port);
+        _udp.write(packet, 5);
+        _udp.endPacket();
+#else
+        // Host fallback: SerialBT captures
+        SerialBT.write(packet, 5);
+#endif
+    }
 }
 void setup() {
     Serial.begin(115200); // Debug output
     // Initialize MIDI RX and Bluetooth for both host tests and ESP32
     Serial2.begin(MIDI_BAUDRATE, 3, MIDI_RX_PIN, -1); // host stub ignores args
+#if USE_BT
     if (!SerialBT.begin("TeachTile")) {
         Serial.println("Failed to start Bluetooth");
     } else {
         Serial.println("Bluetooth SPP started (TeachTile)");
     }
+#else
+    Serial.println("Bluetooth disabled at compile time (USE_BT=0)");
+#endif
     // Print typical serial monitor startup info for ESP32
 #if defined(ESP32)
     Serial.println();
@@ -205,4 +317,16 @@ void loop() {
         }
     }
     // No periodic status printing: updates are printed only when incoming MIDI events are parsed
+    // Add a lightweight periodic status print so we always know whether a note is playing.
+    uint32_t now = millis();
+    if ((now - lastStatusPrintMillis) >= STATUS_PRINT_INTERVAL_MS) {
+        lastStatusPrintMillis = now;
+        if (currentPlayingNote != -1) {
+            uint32_t playingFor = now - currentNoteStart;
+            Serial.printf("Playing: true | Note: %s (%d) | Velocity: %d | Playing for: %lums\n",
+                          midiNoteToName((uint8_t)currentPlayingNote), currentPlayingNote, currentVelocityVal, (unsigned long)playingFor);
+        } else {
+            Serial.println("Playing: false");
+        }
+    }
 }
