@@ -8,7 +8,7 @@
 // Include Arduino headers only when building for Arduino/ESP32
 #if defined(ARDUINO) || defined(ESP32)
 #include <Arduino.h>
-#define USE_BT 0 // set to 1 to enable BluetoothSerial (increase flash size)
+#define USE_BT 1 // set to 1 to enable BluetoothSerial (increase flash size)
 #if USE_BT
 #include "BluetoothSerial.h"
 #endif
@@ -19,14 +19,20 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdarg>
+#include <thread>
 
 struct DummySerial {
     void begin(int) {}
+    /* allow non-literal format strings in host print/printf stubs */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
     void println(const char* s) { std::puts(s); }
     void print(const char* s) { std::fputs(s, stdout); }
     void printf(const char* fmt, ...) { va_list ap; va_start(ap, fmt); vprintf(fmt, ap); va_end(ap); }
+#pragma GCC diagnostic pop
 };
 DummySerial Serial;
+
 
 #include "src/host_stubs.h"
 // Host stubs for Serial2 (MIDI UART) and SerialBT (Bluetooth SPP)
@@ -66,13 +72,54 @@ uint32_t millis() {
 }
 #endif
 
+#if !defined(ESP32)
+// Minimal host main so local builds/linking succeed. Calls setup() and a few loop() iterations.
+// Forward-declare Arduino-style functions so host main can call them before they're defined.
+void setup();
+void loop();
+int main() {
+    Serial.begin(115200);
+    setup();
+
+    // --- Host simulation: send a Note ON, hold briefly, then Note OFF ---
+    Serial.printf("(host) Starting MIDI simulation\n");
+    // Note ON: status 0x90 (channel 0), note 60 (C4), velocity 100
+    Serial2.push(std::vector<uint8_t>{0x90, 60, 100});
+    // Run loop for ~1s (100 iterations * 10ms) to simulate holding the key
+    for (int i = 0; i < 100; ++i) {
+        loop();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    // Note OFF: status 0x80 (channel 0), note 60, velocity 0
+    Serial2.push(std::vector<uint8_t>{0x80, 60, 0});
+    // Allow some time for the OFF to be processed
+    for (int i = 0; i < 50; ++i) {
+        loop();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    // Print captured BT/transport packets (host fallback)
+    try {
+        const auto& captured = SerialBT.getCaptured();
+        Serial.printf("(host) Captured %zu packets\n", captured.size());
+        for (size_t i = 0; i < captured.size(); ++i) {
+            const auto& pkt = captured[i];
+            Serial.printf("(host) pkt %zu: %u %u %u %u %u\n", i, pkt[0], pkt[1], pkt[2], pkt[3], pkt[4]);
+        }
+    } catch (...) {
+        Serial.println("(host) No captured packets or SerialBT unavailable");
+    }
+    return 0;
+}
+#endif
+
 // forward declaration used by ESP-NOW callback
 const char* midiNoteToName(uint8_t note);
 
 // Transport selection: BT = BluetoothSerial (default), ESPNOW = direct ESP32-to-ESP32, UDP = send over WiFi UDP (useful for testing with a Mac)
 enum TransportMode { TM_BT=0, TM_ESPNOW=1, TM_UDP=2 };
 // Change this to TM_ESPNOW when deploying to two ESP32 devices. Use TM_UDP for Mac testing.
-TransportMode transport = TM_ESPNOW;
+TransportMode transport = TM_BT;
 
 #if defined(ESP32)
 #include <WiFi.h>
@@ -139,13 +186,15 @@ void initEspNow() {
 }
 #endif
 
-
+//Idk what im doing by tuping here, idek if Im going to make this work properly. I'm so far behind on this I had to come in today to work on this, and I shouldn't, cause I should be working on other stuff.
 // --- Configuration ---
-// WiFi credentials and router IP
+// WiFi credentials and router IP (ESP32-only)
+#if defined(ESP32)
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 const char* router_ip = "192.168.1.100"; // Change to your router's IP
-const uint16_t router_port = 5005;
+const uint16_t router_port __attribute__((unused)) = 5005;
+#endif
 
 // MIDI UART config
 #define MIDI_RX_PIN 16 // Connect MIDI OUT from piano to this pin
@@ -158,6 +207,11 @@ const uint16_t router_port = 5005;
 #if USE_BT
 BluetoothSerial SerialBT;
 #endif
+#endif
+
+// Fallback define for SERIAL_8N1 on host builds
+#if !defined(SERIAL_8N1)
+#define SERIAL_8N1 0
 #endif
 
 // MIDI message parsing state
@@ -181,6 +235,17 @@ uint32_t currentNoteStart = 0;
 // Periodic status print interval (ms)
 #define STATUS_PRINT_INTERVAL_MS 200
 uint32_t lastStatusPrintMillis = 0;
+// Raw MIDI debug
+#define RAW_MIDI_DUMP_MS 500
+uint32_t lastRawDumpMillis = 0;
+// temporary buffer for raw bytes read in each loop cycle
+uint8_t rawBuf[64];
+size_t rawBufLen = 0;
+// GPIO-level diagnostics
+int lastRxPinState = -1;
+// Pin check timing
+uint32_t lastPinCheckMillis = 0;
+const uint32_t PIN_CHECK_INTERVAL_MS = 100;
 
 // Helper: convert MIDI note number to note name (e.g., 60 -> C4)
 const char* midiNoteToName(uint8_t note) {
@@ -201,9 +266,14 @@ void sendNoteData(uint8_t note, uint32_t duration) {
     packet[3] = (duration >> 8) & 0xFF;
     packet[4] = duration & 0xFF;
     // Send via selected transport
+    // If Bluetooth is enabled and a client is connected, send via SPP
     if (transport == TM_BT) {
 #if USE_BT
-    SerialBT.write(packet, 5);
+    if (SerialBT.hasClient()) {
+        SerialBT.write(packet, 5);
+    } else {
+        Serial.printf("(bt) no client connected; would send note %d dur %lu\n", packet[0], (unsigned long)duration);
+    }
 #else
     Serial.printf("(bt disabled) would send packet for note %d dur %lu\n", packet[0], (unsigned long)duration);
 #endif
@@ -233,7 +303,10 @@ void sendNoteData(uint8_t note, uint32_t duration) {
 void setup() {
     Serial.begin(115200); // Debug output
     // Initialize MIDI RX and Bluetooth for both host tests and ESP32
-    Serial2.begin(MIDI_BAUDRATE, 3, MIDI_RX_PIN, -1); // host stub ignores args
+    // Use explicit SERIAL_8N1 for MIDI UART config. If your MIDI interface inverts the signal
+    // you may need to use SERIAL_8N1 (default) or invert wiring/driver. If you used a raw 3
+    // earlier, that may not be portable across cores; use the Arduino constant instead.
+    Serial2.begin(MIDI_BAUDRATE, SERIAL_8N1, MIDI_RX_PIN, -1); // host stub ignores args
 #if USE_BT
     if (!SerialBT.begin("TeachTile")) {
         Serial.println("Failed to start Bluetooth");
@@ -252,14 +325,42 @@ void setup() {
     uint64_t mac = ESP.getEfuseMac();
     Serial.printf("MAC: %012llX\n", mac);
     Serial.printf("Free heap: %u bytes\n", ESP.getFreeHeap());
+    // Configure RX pin input pullup so we can sense electrical transitions for debugging
+    pinMode(MIDI_RX_PIN, INPUT_PULLUP);
+    lastRxPinState = digitalRead(MIDI_RX_PIN);
+    // Initialize transport-specific networking
+    // Initialize ESP-NOW so this board can receive ESPNOW packets even if we prefer BT.
+    // That lets us use ESP-NOW as an additional wireless transport alongside Bluetooth SPP.
+    Serial.println("Init: attempting to start ESP-NOW (if supported)");
+    initEspNow();
+
+    if (transport == TM_UDP) {
+        Serial.println("Transport: UDP -> connecting to WiFi");
+        WiFi.begin(ssid, password);
+        unsigned long start = millis();
+        while (WiFi.status() != WL_CONNECTED && (millis() - start) < 10000) {
+            delay(200);
+            Serial.print('.');
+        }
+    Serial.println("");
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("WiFi connected, IP: %s\n", WiFi.localIP().toString().c_str());
+            _udp.begin(router_port);
+        } else {
+            Serial.println("WiFi connect failed (UDP transport may not work)");
+        }
+    }
 #else
     Serial.println("Ready to receive MIDI...");
 #endif
 }
 
 void loop() {
+    // Read incoming bytes into rawBuf for optional hex dump
+    rawBufLen = 0;
     while (Serial2.available()) {
         uint8_t byte = Serial2.read();
+        if (rawBufLen < sizeof(rawBuf)) rawBuf[rawBufLen++] = byte;
 
         // MIDI message parsing (only note-on and note-off)
         if (byte & 0x80) { // Status byte
@@ -316,9 +417,24 @@ void loop() {
             }
         }
     }
+    // Dump raw MIDI bytes occasionally for debug if any were read
+    uint32_t now = millis();
+    if (rawBufLen > 0 && (now - lastRawDumpMillis) >= RAW_MIDI_DUMP_MS) {
+        Serial.print("Raw MIDI bytes: ");
+        for (size_t i = 0; i < rawBufLen; ++i) {
+            Serial.printf("%02X ", rawBuf[i]);
+        }
+    Serial.println("");
+        lastRawDumpMillis = now;
+    }
     // No periodic status printing: updates are printed only when incoming MIDI events are parsed
     // Add a lightweight periodic status print so we always know whether a note is playing.
-    uint32_t now = millis();
+    // If we haven't seen any MIDI activity for a short while, clear signalPresent/currentPlayingNote
+    if (signalPresent && (now - lastReceivedMillis) > 2000) {
+        signalPresent = false;
+        currentPlayingNote = -1;
+        currentVelocityVal = 0;
+    }
     if ((now - lastStatusPrintMillis) >= STATUS_PRINT_INTERVAL_MS) {
         lastStatusPrintMillis = now;
         if (currentPlayingNote != -1) {
@@ -329,4 +445,33 @@ void loop() {
             Serial.println("Playing: false");
         }
     }
+
+#if defined(ESP32)
+    // Sample the raw RX pin occasionally and print transitions for electrical diagnostics
+    if ((now - lastPinCheckMillis) >= PIN_CHECK_INTERVAL_MS) {
+        lastPinCheckMillis = now;
+        int s = digitalRead(MIDI_RX_PIN);
+        if (s != lastRxPinState) {
+            lastRxPinState = s;
+            Serial.printf("RX pin state changed: %s\n", s ? "HIGH" : "LOW");
+        }
+    }
+#endif
+
+#if defined(ESP32)
+#if USE_BT
+    // Check for incoming Bluetooth SPP packets (5-byte note packets)
+    if (SerialBT.hasClient()) {
+        while (SerialBT.available() >= 5) {
+            uint8_t buf[5];
+            size_t r = SerialBT.readBytes(buf, 5);
+            if (r == 5) {
+                uint8_t note = buf[0];
+                uint32_t duration = ((uint32_t)buf[1]<<24) | ((uint32_t)buf[2]<<16) | ((uint32_t)buf[3]<<8) | (uint32_t)buf[4];
+                Serial.printf("(BT RX) Note: %s (%d) | Duration: %lu ms\n", midiNoteToName(note), note, duration);
+            }
+        }
+    }
+#endif
+#endif
 }
