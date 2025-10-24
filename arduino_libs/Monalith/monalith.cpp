@@ -1,8 +1,12 @@
 #include "monalith.h"
+#if defined(ARDUINO)
+#include <Arduino.h>
+#else
 #include <cstdio>
 #include <cstdint>
 #include <vector>
 #include <algorithm>
+#endif
 
 #if defined(ARDUINO) && defined(ESP32)
 #include <FastLED.h>
@@ -11,7 +15,8 @@
 #define MONALITH_HAS_FASTLED 0
 #endif
 
-#if defined(USE_PXMATRIX)
+// PxMatrix only on ESP32/ARDUINO builds
+#if defined(USE_PXMATRIX) && defined(ESP32)
 #include <PxMatrix.h>
 #define MONALITH_HAS_PXMATRIX 1
 #else

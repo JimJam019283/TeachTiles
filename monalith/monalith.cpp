@@ -1,5 +1,7 @@
 #include "monalith.h"
+#if defined(ARDUINO)
 #include <Arduino.h>
+#endif
 #include <cstdio>
 #include <cstdint>
 #include <vector>
@@ -13,9 +15,13 @@
 #define MONALITH_HAS_FASTLED 0
 #endif
 
-// Force PxMatrix for HUB75 panels by default so no extra compile flags are required.
+// Force PxMatrix for HUB75 panels by default on ESP32 only so host builds don't try to include PxMatrix.
 #ifndef USE_PXMATRIX
+#if defined(ESP32)
 #define USE_PXMATRIX 1
+#else
+#define USE_PXMATRIX 0
+#endif
 #endif
 // Optional HUB75 parallel panel support via PxMatrix. Enable with -DUSE_PXMATRIX
 #if defined(USE_PXMATRIX)
