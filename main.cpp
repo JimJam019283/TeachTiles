@@ -8,7 +8,7 @@
 // Include Arduino headers only when building for Arduino/ESP32
 #if defined(ARDUINO) || defined(ESP32)
 #include <Arduino.h>
-#define USE_BT 1 // set to 1 to enable BluetoothSerial (increase flash size)
+#define USE_BT 0 // set to 1 to enable BluetoothSerial (increase flash size)
 #if USE_BT
 #include "BluetoothSerial.h"
 #endif
@@ -72,7 +72,7 @@ uint32_t millis() {
 }
 #endif
 
-#if !defined(ESP32)
+#if !defined(ESP32) && !defined(TEST_RUNNER)
 // Minimal host main so local builds/linking succeed. Calls setup() and a few loop() iterations.
 // Forward-declare Arduino-style functions so host main can call them before they're defined.
 void setup();
@@ -113,13 +113,8 @@ int main() {
 }
 #endif
 
-// forward declaration used by ESP-NOW callback
-const char* midiNoteToName(uint8_t note);
-
-// Transport selection: BT = BluetoothSerial (default), ESPNOW = direct ESP32-to-ESP32, UDP = send over WiFi UDP (useful for testing with a Mac)
-enum TransportMode { TM_BT=0, TM_ESPNOW=1, TM_UDP=2 };
-// Change this to TM_ESPNOW when deploying to two ESP32 devices. Use TM_UDP for Mac testing.
-TransportMode transport = TM_BT;
+#include "src/teachtiles.h"
+#include "monalith/monalith.h"
 
 #if defined(ESP32)
 #include <WiFi.h>
@@ -129,18 +124,20 @@ WiFiUDP _udp;
 
 // Peer MAC for ESP-NOW: we can auto-select the peer by matching our own MAC
 // If you know both MACs in advance, list them here. The code will pick the other one as peer.
-// Replace these two with your devices' MACs if different.
-#if defined(ESP32)
 const uint8_t KNOWN_MAC_A[6] = {0xF4,0x65,0x0B,0xC2,0x4A,0x18}; // device seen on /dev/cu.usbserial-0001
 const uint8_t KNOWN_MAC_B[6] = {0x4C,0xC3,0x82,0x07,0xCC,0x04}; // device seen on /dev/cu.usbserial-11
 uint8_t espnow_peer_mac[6] = {0,0,0,0,0,0};
-#endif
+
+// Define transport selection default (can be changed at runtime)
+TransportMode transport = TM_ESPNOW;
 
 void onDataRecv(const esp_now_recv_info_t* info, const uint8_t *data, int len) {
     if (len < 5) return;
     uint8_t note = data[0];
     uint32_t duration = ((uint32_t)data[1]<<24) | ((uint32_t)data[2]<<16) | ((uint32_t)data[3]<<8) | (uint32_t)data[4];
     Serial.printf("(ESP-NOW RX) Note: %s (%d) | Duration: %lu ms\n", midiNoteToName(note), note, duration);
+    // Forward to visualizer
+    Monalith::showNote(note, duration);
 }
 
 void initEspNow() {
@@ -153,7 +150,6 @@ void initEspNow() {
     esp_now_register_recv_cb(onDataRecv);
     // Auto-select peer: if espnow_peer_mac is zero, compare our MAC to known list
     if (memcmp(espnow_peer_mac, (uint8_t[]){0,0,0,0,0,0}, 6) == 0) {
-        // get our MAC as string "xx:xx:xx:xx:xx:xx" then parse
         String macstr = WiFi.macAddress();
         uint8_t mymac[6] = {0};
         int vals[6] = {0};
@@ -196,9 +192,7 @@ const char* router_ip = "192.168.1.100"; // Change to your router's IP
 const uint16_t router_port __attribute__((unused)) = 5005;
 #endif
 
-// MIDI UART config
-#define MIDI_RX_PIN 16 // Connect MIDI OUT from piano to this pin
-#define MIDI_BAUDRATE 31250
+// MIDI UART config (defined in src/teachtiles.h)
 
 // On ESP32/Arduino we use the platform Serial2 and BluetoothSerial; host stubs are above
 #if defined(ESP32)
@@ -214,13 +208,7 @@ BluetoothSerial SerialBT;
 #define SERIAL_8N1 0
 #endif
 
-// MIDI message parsing state
-enum MidiParseState {
-    WAIT_STATUS,
-    WAIT_NOTE,
-    WAIT_VELOCITY
-};
-
+// MIDI message parsing state (type defined in header)
 MidiParseState midiState = WAIT_STATUS;
 uint8_t midiStatus = 0;
 uint8_t midiNote = 0;
@@ -232,11 +220,8 @@ bool signalPresent = false;
 int currentPlayingNote = -1; // -1 when no note
 uint8_t currentVelocityVal = 0;
 uint32_t currentNoteStart = 0;
-// Periodic status print interval (ms)
-#define STATUS_PRINT_INTERVAL_MS 200
+// Periodic status print interval and raw dump intervals are in src/teachtiles.h
 uint32_t lastStatusPrintMillis = 0;
-// Raw MIDI debug
-#define RAW_MIDI_DUMP_MS 500
 uint32_t lastRawDumpMillis = 0;
 // temporary buffer for raw bytes read in each loop cycle
 uint8_t rawBuf[64];
@@ -245,7 +230,6 @@ size_t rawBufLen = 0;
 int lastRxPinState = -1;
 // Pin check timing
 uint32_t lastPinCheckMillis = 0;
-const uint32_t PIN_CHECK_INTERVAL_MS = 100;
 
 // Helper: convert MIDI note number to note name (e.g., 60 -> C4)
 const char* midiNoteToName(uint8_t note) {
@@ -353,6 +337,10 @@ void setup() {
 #else
     Serial.println("Ready to receive MIDI...");
 #endif
+    // Initialize Monalith visualizer
+    if (!Monalith::init()) {
+        Serial.println("Monalith init failed");
+    }
 }
 
 void loop() {
@@ -469,9 +457,33 @@ void loop() {
                 uint8_t note = buf[0];
                 uint32_t duration = ((uint32_t)buf[1]<<24) | ((uint32_t)buf[2]<<16) | ((uint32_t)buf[3]<<8) | (uint32_t)buf[4];
                 Serial.printf("(BT RX) Note: %s (%d) | Duration: %lu ms\n", midiNoteToName(note), note, duration);
+                Monalith::showNote(note, duration);
+            }
+        }
+    }
+#endif
+#if defined(ESP32)
+    // UDP receive: listen for 5-byte packets from the bridge/host
+    if (transport == TM_UDP) {
+        int packetSize = _udp.parsePacket();
+        if (packetSize >= 5) {
+            uint8_t buf[5];
+            int len = _udp.read(buf, 5);
+            if (len == 5) {
+                uint8_t note = buf[0];
+                uint32_t duration = ((uint32_t)buf[1]<<24) | ((uint32_t)buf[2]<<16) | ((uint32_t)buf[3]<<8) | (uint32_t)buf[4];
+                Serial.printf("(UDP RX) Note: %s (%d) | Duration: %lu ms\n", midiNoteToName(note), note, duration);
+                // Forward to visualizer
+                Monalith::showNote(note, duration);
+            } else {
+                // drain the packet if it's larger/shorter to avoid re-reading
+                uint8_t drainBuf[64];
+                while (_udp.available()) _udp.read(drainBuf, sizeof(drainBuf));
             }
         }
     }
 #endif
 #endif
+    // Advance visualizer animations
+    Monalith::tick();
 }

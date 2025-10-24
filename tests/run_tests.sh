@@ -8,7 +8,8 @@ for f in "$ROOT"/tests/test_*.cpp; do
   name=$(basename "$f" .cpp)
   out="$OUTDIR/$name"
   echo "Compiling $name..."
-  /usr/bin/g++ -g -std=c++17 -I"$ROOT" -o "$out" "$f" "$ROOT/main.cpp" -pthread
+  # Link the test with main.cpp and test helper that defines host-side symbols
+  /usr/bin/g++ -g -std=c++17 -I"$ROOT" -I"$ROOT/monalith/src" -DTEST_RUNNER -o "$out" "$f" "$ROOT/main.cpp" "$ROOT/tests/helpers_transport.cpp" "$ROOT/monalith/src/monalith.cpp" -pthread
   echo "Running $name..."
   "$out"
 done

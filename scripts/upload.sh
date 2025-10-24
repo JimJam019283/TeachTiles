@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Use bundled arduino-cli if present
 if [ -x "$ROOT/arduino-cli_1.3.1_macOS_64bit/arduino-cli" ]; then
@@ -31,7 +32,12 @@ if [ -z "$PORT" ]; then
   exit 2
 fi
 
+ARDUINO_LIBS="$ROOT/arduino_libs,$HOME/Arduino/libraries"
+
 echo "Using arduino-cli: $ARDUINO_CLI"
+echo "Compiling sketch (libraries: $ARDUINO_LIBS)"
+$ARDUINO_CLI compile --fqbn esp32:esp32:esp32 --libraries "$ARDUINO_LIBS" "$ROOT"
+
 echo "Uploading to port: $PORT"
 $ARDUINO_CLI upload -p "$PORT" --fqbn esp32:esp32:esp32 "$ROOT"
 
