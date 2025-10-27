@@ -1,4 +1,5 @@
 #include "monalith.h"
+// Arduino-specific includes should only be pulled in when building for the Arduino/ESP32 toolchain.
 #if defined(ARDUINO)
 #include <Arduino.h>
 #endif
@@ -24,11 +25,11 @@
 #endif
 #endif
 // Optional HUB75 parallel panel support via PxMatrix. Enable with -DUSE_PXMATRIX
-#if defined(USE_PXMATRIX)
-#if defined(ESP32)
+// PxMatrix is an ESP32-only library. Only include it when explicitly building for ESP32
+// with USE_PXMATRIX enabled. This avoids CI/host builds trying to find PxMatrix.h.
+#if defined(USE_PXMATRIX) && defined(ESP32)
 #include <driver/gpio.h>
 #include <soc/gpio_struct.h>
-#endif
 #include <PxMatrix.h>
 #define MONALITH_HAS_PXMATRIX 1
 #else

@@ -7,6 +7,58 @@ on:
     branches: [ main ]
 
 jobs:
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y g++ make cmake
+      - name: Run unit tests
+        run: |
+          echo "Running host unit tests (if present)"
+          # Insert host test runner here if you have tests, fallback to a simple build
+          if [ -f tests/run_tests.sh ]; then
+            chmod +x tests/run_tests.sh
+            ./tests/run_tests.sh
+          else
+            echo "No host tests found"
+          fi
+
+  mcu-build:
+    name: MCU build (ESP32)
+    runs-on: ubuntu-latest
+    needs: host-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl unzip
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          export PATH="$HOME/.arduino15/bin:$PATH"
+          arduino-cli version
+      - name: Setup ESP32 core & PxMatrix
+        run: |
+          export PATH="$HOME/.arduino15/bin:$PATH"
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "PxMatrix"
+      - name: Compile sketch for ESP32 (PxMatrix)
+        run: |
+          export PATH="$HOME/.arduino15/bin:$PATH"
+          arduino-cli compile --fqbn esp32:esp32:esp32 --build-property "compiler.cpp.extra_flags=-DUSE_PXMATRIX" .
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
   build-and-test:
     runs-on: ${{ matrix.os }}
     strategy:

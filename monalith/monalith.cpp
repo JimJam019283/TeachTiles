@@ -23,12 +23,12 @@
 #define USE_PXMATRIX 0
 #endif
 #endif
-// Optional HUB75 parallel panel support via PxMatrix. Enable with -DUSE_PXMATRIX
-#if defined(USE_PXMATRIX)
-#if defined(ESP32)
+// PxMatrix is an ESP32-only library. Only include it when building for ESP32
+// with USE_PXMATRIX enabled. This prevents host/CI builds from failing
+// because PxMatrix.h is not available outside the microcontroller toolchain.
+#if defined(USE_PXMATRIX) && defined(ESP32)
 #include <driver/gpio.h>
 #include <soc/gpio_struct.h>
-#endif
 #include <PxMatrix.h>
 #define MONALITH_HAS_PXMATRIX 1
 #else
