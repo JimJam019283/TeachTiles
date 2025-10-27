@@ -32,11 +32,9 @@ if [ -z "$PORT" ]; then
   exit 2
 fi
 
-ARDUINO_LIBS="$ROOT/arduino_libs,$HOME/Arduino/libraries"
-
 echo "Using arduino-cli: $ARDUINO_CLI"
-echo "Compiling sketch (libraries: $ARDUINO_LIBS)"
-$ARDUINO_CLI compile --fqbn esp32:esp32:esp32 --libraries "$ARDUINO_LIBS" "$ROOT"
+echo "Compiling sketch (libraries: $HOME/Arduino/libraries)"
+$ARDUINO_CLI compile --fqbn esp32:esp32:esp32 --libraries "$HOME/Arduino/libraries" "$ROOT"
 
 echo "Uploading to port: $PORT"
 $ARDUINO_CLI upload -p "$PORT" --fqbn esp32:esp32:esp32 "$ROOT"

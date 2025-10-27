@@ -1,0 +1,23 @@
+# Local brew and arduino-cli bundles
+/usr/local/Cellar/
+/opt/homebrew/Cellar/
+arduino-cli_*
+arduino-cli
+Brewfile.lock
+
+# Homebrew cache/locks
+/Users/*/Library/Caches/Homebrew/
+~/.cache/Homebrew/
+arduino_libs/
+arduino_libs.disabled/
+external_libraries/
+external_libraries.disabled/
+
+# macOS artifacts
+.DS_Store
+
+# Build artifacts
+/build
+/main
+/main.o
+/main.dSYM

@@ -9,7 +9,7 @@ for f in "$ROOT"/tests/test_*.cpp; do
   out="$OUTDIR/$name"
   echo "Compiling $name..."
   # Link the test with main.cpp and test helper that defines host-side symbols
-  /usr/bin/g++ -g -std=c++17 -I"$ROOT" -I"$ROOT/monalith/src" -DTEST_RUNNER -o "$out" "$f" "$ROOT/main.cpp" "$ROOT/tests/helpers_transport.cpp" "$ROOT/monalith/src/monalith.cpp" -pthread
+  /usr/bin/g++ -g -std=c++17 -I"$ROOT" -I"$ROOT/monalith" -DTEST_RUNNER -o "$out" "$f" "$ROOT/main.cpp" "$ROOT/tests/helpers_transport.cpp" "$ROOT/monalith/monalith.cpp" -pthread
   echo "Running $name..."
   "$out"
 done

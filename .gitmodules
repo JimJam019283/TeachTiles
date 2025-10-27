@@ -1,0 +1,6 @@
+[submodule "external_libraries/PxMatrix"]
+	path = external_libraries/PxMatrix
+	url = https://github.com/2dom/PxMatrix.git
+[submodule "external_libraries/FastLED"]
+	path = external_libraries/FastLED
+	url = https://github.com/FastLED/FastLED.git

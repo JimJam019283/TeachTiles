@@ -187,6 +187,7 @@ void showNote(uint8_t note, uint32_t duration_ms, uint8_t velocity) {
 #elif MONALITH_HAS_PXMATRIX
     // For PxMatrix, we defer display() to tick() to allow batching; optionally call here for immediate update
     // matrix.display();
+    Serial.printf("Monalith: showNote note=%u idx=%d hue=%u vel=%u dur=%u\n", note, idx, (unsigned)hue, (unsigned)velocity, dur);
 #else
     std::printf("Monalith: showNote note=%u idx=%d hue=%u vel=%u dur=%u\n", note, idx, (unsigned)hue, (unsigned)velocity, dur);
 #endif

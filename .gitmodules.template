@@ -1,0 +1,14 @@
+# Copy this file to .gitmodules and update URLs/paths before running `git submodule update --init --recursive`
+
+[submodule "external_libraries/PxMatrix"]
+	path = external_libraries/PxMatrix
+	url = https://github.com/2dom/PxMatrix.git
+
+[submodule "external_libraries/FastLED"]
+	path = external_libraries/FastLED
+	url = https://github.com/FastLED/FastLED.git
+
+# Example usage:
+# git submodule add https://github.com/2dom/PxMatrix.git external_libraries/PxMatrix
+# git submodule add https://github.com/FastLED/FastLED.git external_libraries/FastLED
+# git submodule update --init --recursive
