@@ -2,6 +2,9 @@
 #if defined(ARDUINO)
 #include <Arduino.h>
 #endif
+#if !defined(ARDUINO)
+#include <thread>
+#endif
 #include <cstdio>
 #include <cstdint>
 #include <vector>
@@ -52,7 +55,10 @@ static CRGB leds[NUM_LEDS];
 #endif
 
 #if MONALITH_HAS_PXMATRIX
-// Default example pin mapping for HUB75 on ESP32 - adjust to your wiring if needed.
+// Default pin mapping set to Waveshare RGB-Matrix-P3 (common ESP32 wiring)
+// LAT and OE are typically 22 and 21 on NodeMCU-32S wiring from Waveshare.
+// A/B/C/D follow the Waveshare diagram variant (A=16,B=17,C=2,D=4).
+// If your panel requires the E pin for 1/32 scan, adjust accordingly.
 #ifndef P_LAT_PIN
 #define P_LAT_PIN 22
 #endif
@@ -60,16 +66,16 @@ static CRGB leds[NUM_LEDS];
 #define P_OE_PIN 21
 #endif
 #ifndef P_A_PIN
-#define P_A_PIN 19
+#define P_A_PIN 16
 #endif
 #ifndef P_B_PIN
-#define P_B_PIN 18
+#define P_B_PIN 17
 #endif
 #ifndef P_C_PIN
-#define P_C_PIN 5
+#define P_C_PIN 2
 #endif
 #ifndef P_D_PIN
-#define P_D_PIN 15
+#define P_D_PIN 4
 #endif
 
 static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN);
@@ -85,6 +91,14 @@ bool init() {
     FastLED.clear();
     FastLED.show();
     std::puts("Monalith: FastLED initialized");
+#elif MONALITH_HAS_PXMATRIX
+    // Initialize PxMatrix framebuffer and parameters for HUB75 panels.
+    // Keep initialization minimal here; applications can adjust pwm bits or timings
+    // if they have specific panel requirements.
+    matrix.begin();
+    matrix.clear();
+    matrix.display();
+    std::puts("Monalith: PxMatrix initialized");
 #else
     std::puts("Monalith: init (host stub)");
 #endif
@@ -159,9 +173,10 @@ void showNote(uint8_t note, uint32_t duration_ms, uint8_t velocity) {
                 default: r = V; g = p; b = q; break;
             }
         };
-        uint8_t r,g,b; hsvToRgb(h, 200, v, r, g, b);
-        uint16_t color565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-        matrix.drawPixel(px, py, color565);
+    uint8_t r,g,b; hsvToRgb(h, 200, v, r, g, b);
+    uint16_t color565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    matrix.drawPixel(px, py, color565);
+    Serial.printf("Monalith: drawPixel x=%d y=%d color565=0x%04X\n", px, py, color565);
 #elif MONALITH_HAS_FASTLED
         int ii = xyToIndex(px, py);
         if (ii < 0 || ii >= NUM_LEDS) return;
@@ -232,6 +247,40 @@ void tick() {
     // host: print active notes for debugging
     if (!activeNotes.empty()) {
         std::printf("Monalith: active=%zu\n", activeNotes.size());
+    }
+#endif
+}
+
+void visualizeDemoSafe(uint32_t ms) {
+    uint32_t start = millis();
+#if MONALITH_HAS_FASTLED
+    // Fill with a distinct color (magenta) for ms duration
+    for (int i = 0; i < NUM_LEDS; ++i) leds[i] = CRGB(255, 0, 255);
+    FastLED.show();
+    while ((int32_t)(millis() - start) < (int32_t)ms) {
+        // allow other tasks; simple delay
+        delay(20);
+    }
+    FastLED.clear();
+    FastLED.show();
+#elif MONALITH_HAS_PXMATRIX
+    // Fill matrix with a bright magenta-like color via PxMatrix
+    uint8_t r = 255, g = 0, b = 255;
+    uint16_t color565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    matrix.clear();
+    for (int y = 0; y < HEIGHT; ++y) for (int x = 0; x < WIDTH; ++x) matrix.drawPixel(x, y, color565);
+    matrix.display();
+    while ((int32_t)(millis() - start) < (int32_t)ms) {
+        delay(20);
+    }
+    matrix.clear();
+    matrix.display();
+#else
+    // Host: print a marker while waiting
+    printf("Monalith: visualizeDemoSafe for %u ms\n", (unsigned)ms);
+    uint32_t now = millis();
+    while ((int32_t)(millis() - now) < (int32_t)ms) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 #endif
 }

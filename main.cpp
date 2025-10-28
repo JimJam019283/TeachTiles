@@ -342,6 +342,11 @@ void setup() {
         Serial.println("Monalith init failed");
     }
 
+    // Startup visual demo: a simple safe fill for 10 seconds so you can verify
+    // physical LED matrix wiring and power before running the interactive test.
+    Serial.println("Startup demo: visualizing for 10s (safe demo)...");
+    Monalith::visualizeDemoSafe(10000);
+
 #if defined(TEST_VISUALIZE)
     // Quick visual test: light C4, E4, G4 with staggered durations
     Monalith::showNote(60, 1500, 120);

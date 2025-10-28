@@ -16,4 +16,9 @@ void showNote(uint8_t note, uint32_t duration_ms, uint8_t velocity = 100);
 // Optional: perform periodic update (call from main loop)
 void tick();
 
+// Safe demo: directly drives the backend to display a simple fill for `ms` milliseconds.
+// This avoids complex animation paths and is safe to call from setup() for a quick
+// hardware verification on both FastLED and PxMatrix backends.
+void visualizeDemoSafe(uint32_t ms);
+
 } // namespace Monalith
