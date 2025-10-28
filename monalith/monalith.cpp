@@ -1,10 +1,5 @@
 #include "monalith.h"
-#if defined(ARDUINO)
 #include <Arduino.h>
-#endif
-#if !defined(ARDUINO)
-#include <thread>
-#endif
 #include <cstdio>
 #include <cstdint>
 #include <vector>
@@ -18,20 +13,16 @@
 #define MONALITH_HAS_FASTLED 0
 #endif
 
-// Force PxMatrix for HUB75 panels by default on ESP32 only so host builds don't try to include PxMatrix.
+// Force PxMatrix for HUB75 panels by default so no extra compile flags are required.
 #ifndef USE_PXMATRIX
-#if defined(ESP32)
 #define USE_PXMATRIX 1
-#else
-#define USE_PXMATRIX 0
 #endif
-#endif
-// PxMatrix is an ESP32-only library. Only include it when building for ESP32
-// with USE_PXMATRIX enabled. This prevents host/CI builds from failing
-// because PxMatrix.h is not available outside the microcontroller toolchain.
-#if defined(USE_PXMATRIX) && defined(ESP32)
+// Optional HUB75 parallel panel support via PxMatrix. Enable with -DUSE_PXMATRIX
+#if defined(USE_PXMATRIX)
+#if defined(ESP32)
 #include <driver/gpio.h>
 #include <soc/gpio_struct.h>
+#endif
 #include <PxMatrix.h>
 #define MONALITH_HAS_PXMATRIX 1
 #else
@@ -55,28 +46,23 @@ static CRGB leds[NUM_LEDS];
 #endif
 
 #if MONALITH_HAS_PXMATRIX
-// Default pin mapping set to Waveshare RGB-Matrix-P3 (common ESP32 wiring)
-// LAT and OE are typically 22 and 21 on NodeMCU-32S wiring from Waveshare.
-// A/B/C/D follow the Waveshare diagram variant (A=16,B=17,C=2,D=4).
-// If your panel requires the E pin for 1/32 scan, adjust accordingly.
-#ifndef P_LAT_PIN
-#define P_LAT_PIN 22
-#endif
-#ifndef P_OE_PIN
-#define P_OE_PIN 21
-#endif
-#ifndef P_A_PIN
-#define P_A_PIN 16
-#endif
-#ifndef P_B_PIN
-#define P_B_PIN 17
-#endif
-#ifndef P_C_PIN
-#define P_C_PIN 2
-#endif
-#ifndef P_D_PIN
-#define P_D_PIN 4
-#endif
+// Pin mapping pinned to your supplied ESP32 wiring
+// Left side (panel): E=GPIO32, R1=GPIO25, G1=GPIO26, B1=GPIO27, R2=GPIO14, G2=GPIO12, B2=GPIO13
+// Right side (panel): A=GPIO23, B=GPIO22, C=GPIO5, D=GPIO18, CLK=GPIO19, LAT=GPIO4, OE=GPIO15
+#define P_E_PIN 32
+#define P_R1_PIN 25
+#define P_G1_PIN 26
+#define P_B1_PIN 27
+#define P_R2_PIN 14
+#define P_G2_PIN 12
+#define P_B2_PIN 13
+#define P_A_PIN 23
+#define P_B_PIN 22
+#define P_C_PIN 5
+#define P_D_PIN 18
+#define P_CLK_PIN 19
+#define P_LAT_PIN 4
+#define P_OE_PIN 15
 
 static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN);
 #endif
@@ -84,26 +70,78 @@ static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C
 // Extended active note: support velocity (0-127) and a trail intensity
 struct ActiveNote { int idx; uint8_t hue; uint8_t vel; uint32_t expire_ms; uint8_t trail_level; };
 static std::vector<ActiveNote> activeNotes;
+// Demo blink state (non-blocking): when demo_end_ms != 0, tick() will toggle full-panel
+static uint32_t demo_end_ms = 0;
+static uint32_t demo_next_toggle = 0;
+static bool demo_on = false;
 
 bool init() {
+    // Initialize available backends. If both FastLED and PxMatrix are compiled in,
+    // initialize both so showNote/tick can safely use either path.
 #if MONALITH_HAS_FASTLED
     FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, NUM_LEDS);
     FastLED.clear();
     FastLED.show();
     std::puts("Monalith: FastLED initialized");
-#elif MONALITH_HAS_PXMATRIX
-    // Initialize PxMatrix framebuffer and parameters for HUB75 panels.
-    // Keep initialization minimal here; applications can adjust pwm bits or timings
-    // if they have specific panel requirements.
+#endif
+#if MONALITH_HAS_PXMATRIX
+    // Force-panel control pins to outputs early to avoid external dongles
+    // holding strapping lines and disabling the panel
+    pinMode(P_OE_PIN, OUTPUT);
+    pinMode(P_LAT_PIN, OUTPUT);
+    pinMode(P_CLK_PIN, OUTPUT);
+    // Drive OE low (enable output), toggle LAT and CLK to a known state
+    digitalWrite(P_OE_PIN, LOW); // enable panel
+    digitalWrite(P_LAT_PIN, HIGH);
+    digitalWrite(P_LAT_PIN, LOW);
+    digitalWrite(P_CLK_PIN, LOW);
+    std::printf("Monalith: forced OE=%d LAT=%d CLK=%d\n", digitalRead(P_OE_PIN), digitalRead(P_LAT_PIN), digitalRead(P_CLK_PIN));
+
+    // initialize PxMatrix frame buffer and set reasonable brightness
     matrix.begin();
-    matrix.clear();
+    matrix.setBrightness(50);
+    matrix.clearDisplay();
     matrix.display();
-    std::puts("Monalith: PxMatrix initialized");
-#else
+    std::puts("Monalith: PxMatrix (HUB75) initialized");
+#endif
+#if !MONALITH_HAS_FASTLED && !MONALITH_HAS_PXMATRIX
     std::puts("Monalith: init (host stub)");
 #endif
     activeNotes.clear();
     return true;
+}
+
+// Simple non-blocking demo runner: schedule a few notes across the keyboard so the
+// display can be sanity-checked during setup. This function schedules notes for
+// `ms` milliseconds and returns immediately.
+void visualizeDemoSafe(uint32_t ms) {
+    // If PxMatrix is available, draw a clear visible test pattern (bright bar) so
+    // the physical panel lights up reliably for the user test.
+#if MONALITH_HAS_PXMATRIX
+    matrix.clearDisplay();
+    // set max brightness and fill the entire panel white
+    // Set up blink demo: non-blocking toggles handled in tick()
+    demo_end_ms = millis() + ms;
+    demo_next_toggle = millis();
+    demo_on = true;
+    matrix.setBrightness(200);
+    matrix.clearDisplay();
+    matrix.display();
+#elif MONALITH_HAS_FASTLED
+    // FastLED: fill strip/pixels with white
+    demo_end_ms = millis() + ms;
+    demo_next_toggle = millis();
+    demo_on = true;
+    FastLED.clear();
+    FastLED.show();
+#else
+    uint8_t demoNotes[] = {36, 48, 60, 72, 84};
+    uint32_t per = ms / (sizeof(demoNotes)/sizeof(demoNotes[0]));
+    for (size_t i = 0; i < (sizeof(demoNotes)/sizeof(demoNotes[0])); ++i) {
+        // schedule staggered notes using showNote with duration `per`
+        showNote(demoNotes[i], per, 100);
+    }
+#endif
 }
 
 // Map a piano MIDI note (21..108) to an LED index inside a WIDTH x HEIGHT matrix.
@@ -173,10 +211,9 @@ void showNote(uint8_t note, uint32_t duration_ms, uint8_t velocity) {
                 default: r = V; g = p; b = q; break;
             }
         };
-    uint8_t r,g,b; hsvToRgb(h, 200, v, r, g, b);
-    uint16_t color565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-    matrix.drawPixel(px, py, color565);
-    Serial.printf("Monalith: drawPixel x=%d y=%d color565=0x%04X\n", px, py, color565);
+        uint8_t r,g,b; hsvToRgb(h, 200, v, r, g, b);
+        uint16_t color565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        matrix.drawPixel(px, py, color565);
 #elif MONALITH_HAS_FASTLED
         int ii = xyToIndex(px, py);
         if (ii < 0 || ii >= NUM_LEDS) return;
@@ -202,7 +239,6 @@ void showNote(uint8_t note, uint32_t duration_ms, uint8_t velocity) {
 #elif MONALITH_HAS_PXMATRIX
     // For PxMatrix, we defer display() to tick() to allow batching; optionally call here for immediate update
     // matrix.display();
-    Serial.printf("Monalith: showNote note=%u idx=%d hue=%u vel=%u dur=%u\n", note, idx, (unsigned)hue, (unsigned)velocity, dur);
 #else
     std::printf("Monalith: showNote note=%u idx=%d hue=%u vel=%u dur=%u\n", note, idx, (unsigned)hue, (unsigned)velocity, dur);
 #endif
@@ -210,6 +246,36 @@ void showNote(uint8_t note, uint32_t duration_ms, uint8_t velocity) {
 
 void tick() {
     uint32_t now = millis();
+    // Handle non-blocking demo blink: 1Hz (toggle every 500ms)
+    if (demo_end_ms != 0 && (int32_t)(demo_end_ms - now) > 0) {
+        if ((int32_t)(demo_next_toggle - now) <= 0) {
+            demo_on = !demo_on;
+            demo_next_toggle = now + 500;
+            // Render full on or clear depending on demo_on
+#if MONALITH_HAS_PXMATRIX
+            if (demo_on) {
+                uint16_t white = 0xFFFF;
+                for (int y = 0; y < HEIGHT; ++y) for (int x = 0; x < WIDTH; ++x) matrix.drawPixel(x, y, white);
+            } else {
+                matrix.clearDisplay();
+            }
+            matrix.display();
+#elif MONALITH_HAS_FASTLED
+            if (demo_on) {
+                for (int i = 0; i < NUM_LEDS; ++i) leds[i] = CRGB::White;
+            } else {
+                for (int i = 0; i < NUM_LEDS; ++i) leds[i] = CRGB::Black;
+            }
+            FastLED.show();
+#endif
+        }
+        return; // while demo active, skip normal rendering
+    } else {
+        // demo finished; reset demo state
+        demo_end_ms = 0;
+        demo_next_toggle = 0;
+        demo_on = false;
+    }
     // Decay trail levels and remove expired notes
     for (auto &a : activeNotes) {
         // trail_level decays over time
@@ -247,40 +313,6 @@ void tick() {
     // host: print active notes for debugging
     if (!activeNotes.empty()) {
         std::printf("Monalith: active=%zu\n", activeNotes.size());
-    }
-#endif
-}
-
-void visualizeDemoSafe(uint32_t ms) {
-    uint32_t start = millis();
-#if MONALITH_HAS_FASTLED
-    // Fill with a distinct color (magenta) for ms duration
-    for (int i = 0; i < NUM_LEDS; ++i) leds[i] = CRGB(255, 0, 255);
-    FastLED.show();
-    while ((int32_t)(millis() - start) < (int32_t)ms) {
-        // allow other tasks; simple delay
-        delay(20);
-    }
-    FastLED.clear();
-    FastLED.show();
-#elif MONALITH_HAS_PXMATRIX
-    // Fill matrix with a bright magenta-like color via PxMatrix
-    uint8_t r = 255, g = 0, b = 255;
-    uint16_t color565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-    matrix.clear();
-    for (int y = 0; y < HEIGHT; ++y) for (int x = 0; x < WIDTH; ++x) matrix.drawPixel(x, y, color565);
-    matrix.display();
-    while ((int32_t)(millis() - start) < (int32_t)ms) {
-        delay(20);
-    }
-    matrix.clear();
-    matrix.display();
-#else
-    // Host: print a marker while waiting
-    printf("Monalith: visualizeDemoSafe for %u ms\n", (unsigned)ms);
-    uint32_t now = millis();
-    while ((int32_t)(millis() - now) < (int32_t)ms) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 #endif
 }

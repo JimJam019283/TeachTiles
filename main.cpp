@@ -341,20 +341,8 @@ void setup() {
     if (!Monalith::init()) {
         Serial.println("Monalith init failed");
     }
-
-    // Startup visual demo: a simple safe fill for 10 seconds so you can verify
-    // physical LED matrix wiring and power before running the interactive test.
-    Serial.println("Startup demo: visualizing for 10s (safe demo)...");
-    Monalith::visualizeDemoSafe(10000);
-
-#if defined(TEST_VISUALIZE)
-    // Quick visual test: light C4, E4, G4 with staggered durations
-    Monalith::showNote(60, 1500, 120);
-    delay(200);
-    Monalith::showNote(64, 1200, 120);
-    delay(200);
-    Monalith::showNote(67, 800, 120);
-#endif
+    // Start a short non-blocking visual demo so we can verify the panel on boot
+    Monalith::visualizeDemoSafe(10000); // 10 seconds
 }
 
 void loop() {
@@ -500,42 +488,4 @@ void loop() {
 #endif
     // Advance visualizer animations
     Monalith::tick();
-
-#if defined(TEST_USB_INPUT)
-    // Test hook: accept 5-byte packets on USB Serial and treat them as note packets [note, dur(4 bytes)]
-    while (Serial.available() >= 5) {
-        uint8_t buf[5];
-        for (int i = 0; i < 5; ++i) buf[i] = (uint8_t)Serial.read();
-        uint8_t note = buf[0];
-        uint32_t duration = ((uint32_t)buf[1]<<24) | ((uint32_t)buf[2]<<16) | ((uint32_t)buf[3]<<8) | (uint32_t)buf[4];
-        Serial.printf("(USB TEST RX) Note: %s (%d) | Duration: %lu ms\n", midiNoteToName(note), note, duration);
-        Monalith::showNote(note, duration);
-    }
-
-    // Also accept simple ASCII test commands for reliability from the host:
-    // Format: NOTE <note> <duration_ms>\n  (example: "NOTE 60 1200\n")
-    static String asciiBuf = "";
-    while (Serial.available()) {
-        char c = (char)Serial.read();
-        if (c == '\n' || c == '\r') {
-            if (asciiBuf.length() > 0) {
-                // parse command
-                int n = 0; long d = 0;
-                if (sscanf(asciiBuf.c_str(), "NOTE %d %ld", &n, &d) == 2) {
-                    if (n >= 0 && n <= 127) {
-                        Serial.printf("(USB ASCII RX) NOTE %d %ld\n", n, d);
-                        Monalith::showNote((uint8_t)n, (uint32_t)d);
-                    } else {
-                        Serial.println("(USB ASCII RX) invalid note");
-                    }
-                }
-                asciiBuf = "";
-            }
-        } else {
-            asciiBuf += c;
-            // clamp buffer
-            if (asciiBuf.length() > 64) asciiBuf = asciiBuf.substring(asciiBuf.length() - 64);
-        }
-    }
-#endif
 }
