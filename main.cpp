@@ -341,8 +341,8 @@ void setup() {
     if (!Monalith::init()) {
         Serial.println("Monalith init failed");
     }
-    // Start a short non-blocking visual demo so we can verify the panel on boot
-    Monalith::visualizeDemoSafe(10000); // 10 seconds
+    // Show the 'C' and '#' glyph for 30 seconds at boot
+    Monalith::drawCSharp(30000); // 30 seconds
 }
 
 void loop() {

@@ -40,6 +40,10 @@ static const int WIDTH = 64;
 static const int HEIGHT = 64;
 static const int NUM_LEDS = WIDTH * HEIGHT; // 4096
 #if MONALITH_HAS_FASTLED
+// forward-declare xyToIndex for functions defined earlier that use it
+static int xyToIndex(int x, int y);
+#endif
+#if MONALITH_HAS_FASTLED
 // Default pin, change if your wiring uses a different GPIO
 static const int LED_PIN = 5;
 static CRGB leds[NUM_LEDS];
@@ -48,7 +52,7 @@ static CRGB leds[NUM_LEDS];
 #if MONALITH_HAS_PXMATRIX
 // Pin mapping pinned to your supplied ESP32 wiring
 // Left side (panel): E=GPIO32, R1=GPIO25, G1=GPIO26, B1=GPIO27, R2=GPIO14, G2=GPIO12, B2=GPIO13
-// Right side (panel): A=GPIO23, B=GPIO22, C=GPIO5, D=GPIO18, CLK=GPIO19, LAT=GPIO4, OE=GPIO15
+// Right side (panel): A=GPIO23, B=GPIO22, C=GPIO5, D=GPIO19, CLK=GPIO18, LAT=GPIO4, OE=GPIO15
 #define P_E_PIN 32
 #define P_R1_PIN 25
 #define P_G1_PIN 26
@@ -59,8 +63,8 @@ static CRGB leds[NUM_LEDS];
 #define P_A_PIN 23
 #define P_B_PIN 22
 #define P_C_PIN 5
-#define P_D_PIN 18
-#define P_CLK_PIN 19
+#define P_D_PIN 19
+#define P_CLK_PIN 18
 #define P_LAT_PIN 4
 #define P_OE_PIN 15
 
@@ -74,6 +78,17 @@ static std::vector<ActiveNote> activeNotes;
 static uint32_t demo_end_ms = 0;
 static uint32_t demo_next_toggle = 0;
 static bool demo_on = false;
+// Glyph display state
+static uint32_t glyph_end_ms = 0;
+static bool glyph_active = false;
+static int glyph_x0 = 0;
+static int glyph_y0 = 0;
+static int glyph_scale = 1;
+static uint16_t glyph_c_color = 0xF800; // red default
+static uint16_t glyph_hash_color = 0xFFFF; // white default
+static bool glyph_printed_map = false;
+
+// NOTE: forceHardwareWhite removed — white hardware test disabled per user request.
 
 bool init() {
     // Initialize available backends. If both FastLED and PxMatrix are compiled in,
@@ -118,12 +133,8 @@ void visualizeDemoSafe(uint32_t ms) {
     // If PxMatrix is available, draw a clear visible test pattern (bright bar) so
     // the physical panel lights up reliably for the user test.
 #if MONALITH_HAS_PXMATRIX
+    // High-level PxMatrix clear/brightness only (white test disabled)
     matrix.clearDisplay();
-    // set max brightness and fill the entire panel white
-    // Set up blink demo: non-blocking toggles handled in tick()
-    demo_end_ms = millis() + ms;
-    demo_next_toggle = millis();
-    demo_on = true;
     matrix.setBrightness(200);
     matrix.clearDisplay();
     matrix.display();
@@ -142,6 +153,102 @@ void visualizeDemoSafe(uint32_t ms) {
         showNote(demoNotes[i], per, 100);
     }
 #endif
+}
+
+// Simple 8x8 bitmaps for 'C' and '#'
+static const uint8_t GLYPH_C[8] = {
+    0b00111100,
+    0b01100110,
+    0b11000000,
+    0b11000000,
+    0b11000000,
+    0b11000000,
+    0b01100110,
+    0b00111100
+};
+
+static const uint8_t GLYPH_HASH[8] = {
+    0b00010010,
+    0b00010010,
+    0b11111111,
+    0b00010010,
+    0b00010010,
+    0b11111111,
+    0b00010010,
+    0b00010010
+};
+
+// convert 16-bit 565 color to 8-bit RGB
+static void color565_to_rgb(uint16_t c565, uint8_t &r, uint8_t &g, uint8_t &b) {
+    uint8_t r5 = (c565 >> 11) & 0x1F;
+    uint8_t g6 = (c565 >> 5) & 0x3F;
+    uint8_t b5 = c565 & 0x1F;
+    r = (r5 << 3) | (r5 >> 2);
+    g = (g6 << 2) | (g6 >> 4);
+    b = (b5 << 3) | (b5 >> 2);
+}
+
+// Draw an 8x8 glyph scaled by `scale` (each glyph pixel becomes scale x scale block)
+void drawGlyphAt(int x0, int y0, const uint8_t *glyph, uint16_t color565, int scale=1, bool print_map=false) {
+    for (int gy = 0; gy < 8; ++gy) {
+        for (int gx = 0; gx < 8; ++gx) {
+            if (!(glyph[gy] & (1 << (7 - gx)))) continue;
+            // draw a scale x scale block
+            for (int sy = 0; sy < scale; ++sy) {
+                for (int sx = 0; sx < scale; ++sx) {
+                    int px = x0 + gx * scale + sx;
+                    int py = y0 + gy * scale + sy;
+#if MONALITH_HAS_PXMATRIX
+                    matrix.drawPixel(px, py, color565);
+#elif MONALITH_HAS_FASTLED
+                    int idx = xyToIndex(px, py);
+                    if (idx >= 0 && idx < NUM_LEDS) {
+                        uint8_t rr,gg,bb; color565_to_rgb(color565, rr, gg, bb);
+                        leds[idx] = CRGB(rr,gg,bb);
+                    }
+#endif
+                    if (print_map) {
+                        int idx = xyToIndex(px, py);
+                        Serial.printf("MAP px=%d py=%d -> idx=%d\n", px, py, idx);
+                    }
+                }
+            }
+        }
+    }
+}
+void drawCSharp(uint32_t ms) {
+    // schedule glyph display for ms milliseconds and draw immediately
+    uint32_t now = millis();
+    glyph_end_ms = now + ms;
+    glyph_active = true;
+    glyph_printed_map = false;
+
+    // scale glyphs 2x to produce 16x16 each
+    int scale = 2;
+    int glyphW = 8 * scale;
+    int gap = 2 * scale;
+    int totalW = glyphW + gap + glyphW;
+    int x0 = (WIDTH - totalW) / 2;
+    int y0 = (HEIGHT - glyphW) / 2;
+    glyph_x0 = x0;
+    glyph_y0 = y0;
+    glyph_scale = scale;
+    glyph_c_color = 0xF800; // red
+    glyph_hash_color = 0xFFFF; // white
+
+    // initial draw (also print mapping once)
+#if MONALITH_HAS_PXMATRIX
+    matrix.clearDisplay();
+    drawGlyphAt(x0, y0, GLYPH_C, glyph_c_color, scale, true);
+    drawGlyphAt(x0 + glyphW + gap, y0, GLYPH_HASH, glyph_hash_color, scale, true);
+    matrix.display();
+#elif MONALITH_HAS_FASTLED
+    FastLED.clear();
+    drawGlyphAt(x0, y0, GLYPH_C, glyph_c_color, scale, true);
+    drawGlyphAt(x0 + glyphW + gap, y0, GLYPH_HASH, glyph_hash_color, scale, true);
+    FastLED.show();
+#endif
+    glyph_printed_map = true;
 }
 
 // Map a piano MIDI note (21..108) to an LED index inside a WIDTH x HEIGHT matrix.
@@ -275,6 +382,35 @@ void tick() {
         demo_end_ms = 0;
         demo_next_toggle = 0;
         demo_on = false;
+    }
+    // If a glyph is active, redraw it every tick so it persists
+    if (glyph_active) {
+        if ((int32_t)(glyph_end_ms - now) <= 0) {
+            glyph_active = false;
+            // clear display when finished
+#if MONALITH_HAS_PXMATRIX
+            matrix.clearDisplay();
+            matrix.display();
+#elif MONALITH_HAS_FASTLED
+            FastLED.clear();
+            FastLED.show();
+#endif
+        } else {
+            // redraw glyph frame
+            int x0 = glyph_x0;
+            int y0 = glyph_y0;
+            int scale = glyph_scale;
+#if MONALITH_HAS_PXMATRIX
+            drawGlyphAt(x0, y0, GLYPH_C, glyph_c_color, scale, false);
+            drawGlyphAt(x0 + (8*scale) + (2*scale), y0, GLYPH_HASH, glyph_hash_color, scale, false);
+            matrix.display();
+#elif MONALITH_HAS_FASTLED
+            drawGlyphAt(x0, y0, GLYPH_C, glyph_c_color, scale, false);
+            drawGlyphAt(x0 + (8*scale) + (2*scale), y0, GLYPH_HASH, glyph_hash_color, scale, false);
+            FastLED.show();
+#endif
+        }
+        return; // skip normal rendering while glyph active
     }
     // Decay trail levels and remove expired notes
     for (auto &a : activeNotes) {

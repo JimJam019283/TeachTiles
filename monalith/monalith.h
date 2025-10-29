@@ -20,4 +20,7 @@ void tick();
 // schedules a short demo sequence; useful for sanity-checking hardware in setup().
 void visualizeDemoSafe(uint32_t ms);
 
+// Draw a 'C' glyph with a '#' symbol to its right across the panel for `ms` milliseconds
+void drawCSharp(uint32_t ms);
+
 } // namespace Monalith
