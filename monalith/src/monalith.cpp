@@ -5,6 +5,7 @@
 #endif
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include <algorithm>
 
@@ -54,32 +55,76 @@ static CRGB leds[NUM_LEDS];
 #endif
 
 #if MONALITH_HAS_PXMATRIX
-// Default example pin mapping for HUB75 on ESP32 - adjust to your wiring if needed.
-#ifndef P_LAT_PIN
-#define P_LAT_PIN 22
+// Default example pin mapping for HUB75 on ESP32 - adjusted to user's wiring.
+// We'll define the pins if not already provided via build flags.
+#ifndef P_R1_PIN
+#define P_R1_PIN 26
 #endif
-#ifndef P_OE_PIN
-#define P_OE_PIN 21
+#ifndef P_G1_PIN
+#define P_G1_PIN 27
+#endif
+#ifndef P_B1_PIN
+#define P_B1_PIN 32
+#endif
+#ifndef P_R2_PIN
+#define P_R2_PIN 33
+#endif
+#ifndef P_G2_PIN
+#define P_G2_PIN 25
+#endif
+#ifndef P_B2_PIN
+#define P_B2_PIN 13
+#endif
+#ifndef P_E_PIN
+#define P_E_PIN 14
 #endif
 #ifndef P_A_PIN
-#define P_A_PIN 19
+#define P_A_PIN 23
 #endif
 #ifndef P_B_PIN
-#define P_B_PIN 18
+#define P_B_PIN 22
 #endif
 #ifndef P_C_PIN
-#define P_C_PIN 5
+#define P_C_PIN 21
 #endif
 #ifndef P_D_PIN
-#define P_D_PIN 15
+#define P_D_PIN 19
+#endif
+#ifndef P_CLK_PIN
+#define P_CLK_PIN 18
+#endif
+#ifndef P_LAT_PIN
+#define P_LAT_PIN 5
+#endif
+#ifndef P_OE_PIN
+#define P_OE_PIN 15
 #endif
 
-static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN);
+// Include P_E_PIN when constructing PxMATRIX in case the panel requires 5 address lines
+static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN, P_E_PIN);
 #endif
 
 // Extended active note: support velocity (0-127) and a trail intensity
 struct ActiveNote { int idx; uint8_t hue; uint8_t vel; uint32_t expire_ms; uint8_t trail_level; };
 static std::vector<ActiveNote> activeNotes;
+
+// Static bitmap buffer (RGB565). When active, `tick()` will render this buffer
+// on the panel instead of the animated note visuals. Caller provides an array
+// of WIDTH*HEIGHT uint16_t values in RGB565 layout. The buffer is kept as a
+// copy so the caller can free or modify their source after calling.
+static bool staticBitmapActive = false;
+static uint16_t staticBitmapBuf[NUM_LEDS];
+
+// Display state machine
+static DisplayState currentDisplayState = DisplayState::Normal;
+
+void setDisplayState(DisplayState s) {
+    currentDisplayState = s;
+}
+
+DisplayState getDisplayState() {
+    return currentDisplayState;
+}
 
 bool init() {
 #if MONALITH_HAS_FASTLED
@@ -91,6 +136,12 @@ bool init() {
     std::puts("Monalith: init (host stub)");
 #endif
     activeNotes.clear();
+#if MONALITH_HAS_PXMATRIX
+    // Print configured pin mapping for verification
+    std::printf("Monalith: PxMatrix pins LAT=%d OE=%d A=%d B=%d C=%d D=%d CLK=%d R1=%d G1=%d B1=%d R2=%d G2=%d B2=%d E=%d\n",
+                P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN, P_CLK_PIN,
+                P_R1_PIN, P_G1_PIN, P_B1_PIN, P_R2_PIN, P_G2_PIN, P_B2_PIN, P_E_PIN);
+#endif
     return true;
 }
 
@@ -196,8 +247,122 @@ void showNote(uint8_t note, uint32_t duration_ms, uint8_t velocity) {
 #endif
 }
 
+// Display a persistent RGB565 bitmap (WIDTH x HEIGHT). The bitmap is copied
+// into an internal buffer and will be displayed until `clearStaticBitmap()`
+// is called. If `bitmap` is null the request is ignored.
+void showStaticBitmap(const uint16_t* bitmap) {
+    if (!bitmap) return;
+    // copy NUM_LEDS 16-bit values
+    std::memcpy(staticBitmapBuf, bitmap, sizeof(staticBitmapBuf));
+    staticBitmapActive = true;
+    setDisplayState(DisplayState::StaticBitmap);
+    // Immediately perform a bright full-panel white draw so users can verify the
+    // panel is powered and responsive. Then blit the provided bitmap to the
+    // framebuffer and present it.
+#if MONALITH_HAS_PXMATRIX
+    matrix.setBrightness(255);
+    // draw solid white
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            matrix.drawPixel(x, y, 0xFFFF);
+        }
+    }
+    matrix.display();
+    // keep the white frame visible for 30 seconds so the user can inspect the panel
+    delay(30000);
+    // Color-channel visibility test: red, green, blue, white (3s each)
+    const uint16_t COL_RED = 0xF800;
+    const uint16_t COL_GREEN = 0x07E0;
+    const uint16_t COL_BLUE = 0x001F;
+    const uint16_t COL_WHITE = 0xFFFF;
+    std::puts("Monalith: starting color-channel test: RED/GREEN/BLUE/WHITE");
+    uint16_t colors[] = {COL_RED, COL_GREEN, COL_BLUE, COL_WHITE};
+    for (uint16_t c : colors) {
+        matrix.clearDisplay();
+        for (int y = 0; y < HEIGHT; ++y) for (int x = 0; x < WIDTH; ++x) matrix.drawPixel(x, y, c);
+        matrix.display();
+        if (c == COL_RED) std::puts("Monalith: COLOR TEST red");
+        else if (c == COL_GREEN) std::puts("Monalith: COLOR TEST green");
+        else if (c == COL_BLUE) std::puts("Monalith: COLOR TEST blue");
+        else std::puts("Monalith: COLOR TEST white");
+        delay(3000);
+    }
+    // Slower row-sweep diagnostic: light each row red and print the row index (200ms per row)
+    for (int y = 0; y < HEIGHT; ++y) {
+        matrix.clearDisplay();
+        for (int x = 0; x < WIDTH; ++x) {
+            matrix.drawPixel(x, y, COL_RED); // red (RGB565)
+        }
+        matrix.display();
+        std::printf("Monalith: row-sweep row=%d\n", y);
+        delay(200);
+    }
+    // Blit the copied bitmap immediately after the diagnostic
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            int idx = y * WIDTH + x;
+            uint16_t c = staticBitmapBuf[idx];
+            matrix.drawPixel(x, y, c);
+        }
+    }
+    matrix.display();
+#endif
+    // Log activation for serial verification
+    std::puts("Monalith: static bitmap enabled");
+}
+
+// Stop displaying the static bitmap and resume normal animated behavior.
+void clearStaticBitmap() {
+    staticBitmapActive = false;
+#if MONALITH_HAS_PXMATRIX
+    // optionally clear the matrix framebuffer
+    for (int y = 0; y < HEIGHT; ++y) for (int x = 0; x < WIDTH; ++x) matrix.drawPixel(x, y, 0);
+    matrix.display();
+#elif MONALITH_HAS_FASTLED
+    FastLED.clear();
+    FastLED.show();
+#endif
+}
+
 void tick() {
     uint32_t now = millis();
+    // If a static bitmap is active, render it and return immediately.
+    if (staticBitmapActive) {
+#if MONALITH_HAS_PXMATRIX
+        // PxMatrix expects 16-bit RGB565; simply blit the bitmap into framebuffer
+        for (int y = 0; y < HEIGHT; ++y) {
+            for (int x = 0; x < WIDTH; ++x) {
+                int idx = y * WIDTH + x;
+                uint16_t color565 = staticBitmapBuf[idx];
+                matrix.drawPixel(x, y, color565);
+            }
+        }
+        matrix.display();
+#elif MONALITH_HAS_FASTLED
+        // Expand RGB565 into 8-bit RGB and write into FastLED buffer using xyToIndex mapping
+        for (int y = 0; y < HEIGHT; ++y) {
+            for (int x = 0; x < WIDTH; ++x) {
+                int idx = y * WIDTH + x;
+                uint16_t color565 = staticBitmapBuf[idx];
+                // expand RGB565 -> r,g,b (8-bit)
+                uint8_t r5 = (color565 >> 11) & 0x1F;
+                uint8_t g6 = (color565 >> 5) & 0x3F;
+                uint8_t b5 = color565 & 0x1F;
+                uint8_t r = (r5 << 3) | (r5 >> 2);
+                uint8_t g = (g6 << 2) | (g6 >> 4);
+                uint8_t b = (b5 << 3) | (b5 >> 2);
+                int ii = xyToIndex(x, y);
+                if (ii >= 0 && ii < NUM_LEDS) leds[ii] = CRGB(r, g, b);
+            }
+        }
+        FastLED.show();
+#else
+        // Host: print a small notice once
+        static bool once = false;
+        if (!once) { std::puts("Monalith: static bitmap active (host stub)"); once = true; }
+#endif
+        return;
+    }
     // Decay trail levels and remove expired notes
     for (auto &a : activeNotes) {
         // trail_level decays over time

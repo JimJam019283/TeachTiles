@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include <algorithm>
 
@@ -50,26 +51,113 @@ static CRGB leds[NUM_LEDS];
 #endif
 
 #if MONALITH_HAS_PXMATRIX
-// Pin mapping pinned to your supplied ESP32 wiring
-// Left side (panel): E=GPIO32, R1=GPIO25, G1=GPIO26, B1=GPIO27, R2=GPIO14, G2=GPIO12, B2=GPIO13
-// Right side (panel): A=GPIO23, B=GPIO22, C=GPIO5, D=GPIO19, CLK=GPIO18, LAT=GPIO4, OE=GPIO15
-#define P_E_PIN 32
-#define P_R1_PIN 25
-#define P_G1_PIN 26
-#define P_B1_PIN 27
-#define P_R2_PIN 14
-#define P_G2_PIN 12
+// Pin mapping updated to user's ESP32 wiring
+// Mapping requested by user:
+// r1 - D26
+// G1 - D27
+// B1 - D32
+// GND - GND
+// r2 - d33
+// G2 - 25
+// B2 - 13
+// E - 14
+// A - 23
+// B - 22
+// C - 21
+// D - 19
+// CLK - 18
+// Lat - 5
+// OE - 15
+#define P_R1_PIN 26
+#define P_G1_PIN 27
+#define P_B1_PIN 32
+#define P_R2_PIN 33
+#define P_G2_PIN 25
 #define P_B2_PIN 13
+#define P_E_PIN 14
 #define P_A_PIN 23
 #define P_B_PIN 22
-#define P_C_PIN 5
+#define P_C_PIN 21
 #define P_D_PIN 19
 #define P_CLK_PIN 18
-#define P_LAT_PIN 4
+#define P_LAT_PIN 5
 #define P_OE_PIN 15
 
-static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN);
+// Include P_E_PIN when constructing PxMATRIX in case the panel requires 5 address lines
+static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN, P_E_PIN);
 #endif
+
+// Static bitmap storage and display-state (defined here so Arduino build links them)
+static bool staticBitmapActive = false;
+static uint16_t staticBitmapBuf[WIDTH * HEIGHT];
+static DisplayState currentDisplayState = DisplayState::Normal;
+
+void showStaticBitmap(const uint16_t* bitmap) {
+    if (!bitmap) return;
+    std::memcpy(staticBitmapBuf, bitmap, sizeof(staticBitmapBuf));
+    staticBitmapActive = true;
+#if defined(USE_PXMATRIX)
+    // Immediately perform a bright full-panel white draw so users can verify the
+    // panel is powered and responsive. Then blit the provided bitmap to the
+    // framebuffer and present it.
+    matrix.setBrightness(255);
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            matrix.drawPixel(x, y, 0xFFFF);
+        }
+    }
+    matrix.display();
+    delay(10000);
+    // Color-channel visibility test: red, green, blue, white (3s each)
+    const uint16_t COL_RED = 0xF800;
+    const uint16_t COL_GREEN = 0x07E0;
+    const uint16_t COL_BLUE = 0x001F;
+    const uint16_t COL_WHITE = 0xFFFF;
+    std::puts("Monalith: starting color-channel test: RED/GREEN/BLUE/WHITE");
+    uint16_t colors[] = {COL_RED, COL_GREEN, COL_BLUE, COL_WHITE};
+    for (uint16_t c : colors) {
+        matrix.clearDisplay();
+        for (int y = 0; y < HEIGHT; ++y) for (int x = 0; x < WIDTH; ++x) matrix.drawPixel(x, y, c);
+        matrix.display();
+        if (c == COL_RED) std::puts("Monalith: COLOR TEST red");
+        else if (c == COL_GREEN) std::puts("Monalith: COLOR TEST green");
+        else if (c == COL_BLUE) std::puts("Monalith: COLOR TEST blue");
+        else std::puts("Monalith: COLOR TEST white");
+        delay(3000);
+    }
+    // Slower row-sweep diagnostic: light each row red and print the row index (200ms per row)
+    for (int y = 0; y < HEIGHT; ++y) {
+        matrix.clearDisplay();
+        for (int x = 0; x < WIDTH; ++x) {
+            matrix.drawPixel(x, y, COL_RED); // red (RGB565)
+        }
+        matrix.display();
+        std::printf("Monalith: row-sweep row=%d\n", y);
+        delay(200);
+    }
+    // Blit the copied bitmap immediately after the diagnostic
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            int idx = y * WIDTH + x;
+            uint16_t c = staticBitmapBuf[idx];
+            matrix.drawPixel(x, y, c);
+        }
+    }
+    matrix.display();
+#endif
+    std::puts("Monalith: static bitmap enabled (library)");
+}
+
+void clearStaticBitmap() {
+    staticBitmapActive = false;
+#if defined(USE_PXMATRIX)
+    for (int y = 0; y < HEIGHT; ++y) for (int x = 0; x < WIDTH; ++x) matrix.drawPixel(x, y, 0);
+    matrix.display();
+#endif
+}
+
+void setDisplayState(DisplayState s) { currentDisplayState = s; }
+DisplayState getDisplayState() { return currentDisplayState; }
 
 // Extended active note: support velocity (0-127) and a trail intensity
 struct ActiveNote { int idx; uint8_t hue; uint8_t vel; uint32_t expire_ms; uint8_t trail_level; };
@@ -118,6 +206,10 @@ bool init() {
     matrix.clearDisplay();
     matrix.display();
     std::puts("Monalith: PxMatrix (HUB75) initialized");
+    // Print configured pin mapping for verification
+    std::printf("Monalith: PxMatrix pins LAT=%d OE=%d A=%d B=%d C=%d D=%d CLK=%d R1=%d G1=%d B1=%d R2=%d G2=%d B2=%d E=%d\n",
+                P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN, P_CLK_PIN,
+                P_R1_PIN, P_G1_PIN, P_B1_PIN, P_R2_PIN, P_G2_PIN, P_B2_PIN, P_E_PIN);
 #endif
 #if !MONALITH_HAS_FASTLED && !MONALITH_HAS_PXMATRIX
     std::puts("Monalith: init (host stub)");
@@ -129,30 +221,9 @@ bool init() {
 // Simple non-blocking demo runner: schedule a few notes across the keyboard so the
 // display can be sanity-checked during setup. This function schedules notes for
 // `ms` milliseconds and returns immediately.
-void visualizeDemoSafe(uint32_t ms) {
-    // If PxMatrix is available, draw a clear visible test pattern (bright bar) so
-    // the physical panel lights up reliably for the user test.
-#if MONALITH_HAS_PXMATRIX
-    // High-level PxMatrix clear/brightness only (white test disabled)
-    matrix.clearDisplay();
-    matrix.setBrightness(200);
-    matrix.clearDisplay();
-    matrix.display();
-#elif MONALITH_HAS_FASTLED
-    // FastLED: fill strip/pixels with white
-    demo_end_ms = millis() + ms;
-    demo_next_toggle = millis();
-    demo_on = true;
-    FastLED.clear();
-    FastLED.show();
-#else
-    uint8_t demoNotes[] = {36, 48, 60, 72, 84};
-    uint32_t per = ms / (sizeof(demoNotes)/sizeof(demoNotes[0]));
-    for (size_t i = 0; i < (sizeof(demoNotes)/sizeof(demoNotes[0])); ++i) {
-        // schedule staggered notes using showNote with duration `per`
-        showNote(demoNotes[i], per, 100);
-    }
-#endif
+void visualizeDemoSafe(uint32_t /*ms*/) {
+    // Demo functions disabled: only static bitmap boot path is used.
+    // Intentionally left empty to preserve existing API but avoid test patterns.
 }
 
 // Simple 8x8 bitmaps for 'C' and '#'

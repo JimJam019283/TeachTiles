@@ -341,8 +341,9 @@ void setup() {
     if (!Monalith::init()) {
         Serial.println("Monalith init failed");
     }
-    // Show the 'C' and '#' glyph for 30 seconds at boot
-    Monalith::drawCSharp(30000); // 30 seconds
+    extern const uint16_t example_bitmap[]; // defined in example_bitmap.c
+    Monalith::showStaticBitmap(example_bitmap);
+    Monalith::setDisplayState(Monalith::DisplayState::StaticBitmap);
 }
 
 void loop() {
