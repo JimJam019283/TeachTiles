@@ -1,0 +1,26 @@
+This manifest lists files/folders moved to archive/removed_tests for recovery.
+
+Folders moved:
+- hardware_test/
+- hw_cycle_rgb/
+- hw_mapping_expand/
+- hw_mapping_longer/
+- hw_single_pixel_test/
+- hw_test_red/
+- 1_SimpleTestShapes_patched/
+- tests/
+
+Large libraries removed (moved):
+- libraries/PxMatrix/
+- libraries/ESP32-HUB75-MatrixPanel-I2S-DMA/
+
+Build artifacts removed:
+- main
+- host_main
+- midi2udp
+- native_main.o
+- main.dSYM/
+- host_main.dSYM/
+- nohup.out
+
+If you need to restore any file, check the archive/removed_tests directory (contains the moved folders) or recover from git.

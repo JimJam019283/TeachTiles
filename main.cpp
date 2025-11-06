@@ -341,9 +341,31 @@ void setup() {
     if (!Monalith::init()) {
         Serial.println("Monalith init failed");
     }
+    // Short visual test: flash full red -> off -> full red (ESP32 only) so we can
+    // confirm the panel is connected and receiving data. This is temporary.
+#if defined(ESP32)
     extern const uint16_t example_bitmap[]; // defined in example_bitmap.c
     Monalith::showStaticBitmap(example_bitmap);
     Monalith::setDisplayState(Monalith::DisplayState::StaticBitmap);
+#else
+    extern const uint16_t example_bitmap[]; // defined in example_bitmap.c
+    Monalith::showStaticBitmap(example_bitmap);
+    Monalith::setDisplayState(Monalith::DisplayState::StaticBitmap);
+#endif
+    // Auto-clear the static bitmap after 60 seconds so the overlay is visible
+    // for a measured period and then the display returns to normal behavior.
+#if defined(ESP32)
+    // Use a simple lambda+task to delay and clear without blocking setup().
+    auto clear_task = [](void*) {
+        const uint32_t delay_ms = 60000;
+        vTaskDelay(delay_ms / portTICK_PERIOD_MS);
+        Monalith::clearStaticBitmap();
+        // delete this task
+        vTaskDelete(nullptr);
+    };
+    // create a low-priority task to perform the delayed clear
+    xTaskCreatePinnedToCore(clear_task, "clear_bitmap", 2048, nullptr, 1, nullptr, 1);
+#endif
 }
 
 void loop() {

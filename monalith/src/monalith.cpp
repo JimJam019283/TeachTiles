@@ -58,25 +58,25 @@ static CRGB leds[NUM_LEDS];
 // Default example pin mapping for HUB75 on ESP32 - adjusted to user's wiring.
 // We'll define the pins if not already provided via build flags.
 #ifndef P_R1_PIN
-#define P_R1_PIN 26
+#define P_R1_PIN 25
 #endif
 #ifndef P_G1_PIN
-#define P_G1_PIN 27
+#define P_G1_PIN 26
 #endif
 #ifndef P_B1_PIN
-#define P_B1_PIN 32
+#define P_B1_PIN 27
 #endif
 #ifndef P_R2_PIN
-#define P_R2_PIN 33
+#define P_R2_PIN 14
 #endif
 #ifndef P_G2_PIN
-#define P_G2_PIN 25
+#define P_G2_PIN 12
 #endif
 #ifndef P_B2_PIN
 #define P_B2_PIN 13
 #endif
 #ifndef P_E_PIN
-#define P_E_PIN 14
+#define P_E_PIN 32
 #endif
 #ifndef P_A_PIN
 #define P_A_PIN 23
@@ -85,7 +85,7 @@ static CRGB leds[NUM_LEDS];
 #define P_B_PIN 22
 #endif
 #ifndef P_C_PIN
-#define P_C_PIN 21
+#define P_C_PIN 5
 #endif
 #ifndef P_D_PIN
 #define P_D_PIN 19
@@ -94,7 +94,7 @@ static CRGB leds[NUM_LEDS];
 #define P_CLK_PIN 18
 #endif
 #ifndef P_LAT_PIN
-#define P_LAT_PIN 5
+#define P_LAT_PIN 4
 #endif
 #ifndef P_OE_PIN
 #define P_OE_PIN 15
