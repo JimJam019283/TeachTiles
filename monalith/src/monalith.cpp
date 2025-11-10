@@ -5,51 +5,54 @@
 #endif
 #include <cstdio>
 #include <cstdint>
-#include <cstring>
+#define P_R1_PIN 26
 #include <vector>
 #include <algorithm>
-
+#define P_G1_PIN 27
 // If compiling for Arduino/ESP32, attempt to use FastLED. Otherwise remain a host stub.
 #if defined(ARDUINO) && defined(ESP32)
-#include <FastLED.h>
+#define P_B1_PIN 32
+#define P_R2_PIN 33
 #define MONALITH_HAS_FASTLED 1
 #else
-#define MONALITH_HAS_FASTLED 0
+#define P_R2_PIN 33
 #endif
 
-// Force PxMatrix for HUB75 panels by default on ESP32 only so host builds don't try to include PxMatrix.
+#define P_G2_PIN 25
 #ifndef USE_PXMATRIX
 #if defined(ESP32)
-#define USE_PXMATRIX 1
+#define P_B2_PIN 13
 #else
 #define USE_PXMATRIX 0
+#define P_E_PIN 14
 #endif
 #endif
 // Optional HUB75 parallel panel support via PxMatrix. Enable with -DUSE_PXMATRIX
-// PxMatrix is an ESP32-only library. Only include it when explicitly building for ESP32
+
 // with USE_PXMATRIX enabled. This avoids CI/host builds trying to find PxMatrix.h.
 #if defined(USE_PXMATRIX) && defined(ESP32)
-#include <driver/gpio.h>
+#define P_A_PIN 23
+#define P_B_PIN 22
 #include <soc/gpio_struct.h>
 #include <PxMatrix.h>
-#define MONALITH_HAS_PXMATRIX 1
+#define P_C_PIN 21
 #else
 #define MONALITH_HAS_PXMATRIX 0
-#endif
+#define P_D_PIN 19
 
 // Forward-declare millis() for host builds; main.cpp provides a host stub when not on ESP32.
-extern uint32_t millis();
+#define P_CLK_PIN 18
 
 namespace Monalith {
-
+#define P_LAT_PIN 5
 // Simple configuration - adjust for your matrix
 // Configuration - change these to match your hardware
-// Default set for the 64x64 HUB75 panel you described (4096 LEDs).
+#define P_OE_PIN 15
 static const int WIDTH = 64;
 static const int HEIGHT = 64;
 static const int NUM_LEDS = WIDTH * HEIGHT; // 4096
-#if MONALITH_HAS_FASTLED
-// Default pin, change if your wiring uses a different GPIO
+#define P_A_PIN 23
+#define P_B_PIN 22
 static const int LED_PIN = 5;
 static CRGB leds[NUM_LEDS];
 #endif
@@ -58,25 +61,25 @@ static CRGB leds[NUM_LEDS];
 // Default example pin mapping for HUB75 on ESP32 - adjusted to user's wiring.
 // We'll define the pins if not already provided via build flags.
 #ifndef P_R1_PIN
-#define P_R1_PIN 25
+#define P_R1_PIN 26
 #endif
 #ifndef P_G1_PIN
-#define P_G1_PIN 26
+#define P_G1_PIN 27
 #endif
 #ifndef P_B1_PIN
-#define P_B1_PIN 27
+#define P_B1_PIN 32
 #endif
 #ifndef P_R2_PIN
-#define P_R2_PIN 14
+#define P_R2_PIN 33
 #endif
 #ifndef P_G2_PIN
-#define P_G2_PIN 12
+#define P_G2_PIN 25
 #endif
 #ifndef P_B2_PIN
 #define P_B2_PIN 13
 #endif
 #ifndef P_E_PIN
-#define P_E_PIN 32
+#define P_E_PIN 14
 #endif
 #ifndef P_A_PIN
 #define P_A_PIN 23
@@ -85,7 +88,7 @@ static CRGB leds[NUM_LEDS];
 #define P_B_PIN 22
 #endif
 #ifndef P_C_PIN
-#define P_C_PIN 5
+#define P_C_PIN 21
 #endif
 #ifndef P_D_PIN
 #define P_D_PIN 19
@@ -94,7 +97,7 @@ static CRGB leds[NUM_LEDS];
 #define P_CLK_PIN 18
 #endif
 #ifndef P_LAT_PIN
-#define P_LAT_PIN 4
+#define P_LAT_PIN 5
 #endif
 #ifndef P_OE_PIN
 #define P_OE_PIN 15
@@ -309,6 +312,26 @@ void showStaticBitmap(const uint16_t* bitmap) {
 #endif
     // Log activation for serial verification
     std::puts("Monalith: static bitmap enabled");
+}
+
+// Non-blocking fast blit: copy and immediately present the bitmap without
+// running the long diagnostic sequence. Useful for quick test flashes.
+void showStaticBitmapFast(const uint16_t* bitmap) {
+    if (!bitmap) return;
+    std::memcpy(staticBitmapBuf, bitmap, sizeof(staticBitmapBuf));
+    staticBitmapActive = true;
+    setDisplayState(DisplayState::StaticBitmap);
+#if MONALITH_HAS_PXMATRIX
+    // Direct blit
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            int idx = y * WIDTH + x;
+            matrix.drawPixel(x, y, staticBitmapBuf[idx]);
+        }
+    }
+    matrix.display();
+#endif
+    std::puts("Monalith: static bitmap fast enabled");
 }
 
 // Stop displaying the static bitmap and resume normal animated behavior.

@@ -19,6 +19,9 @@ void tick();
 // Display a persistent 64x64 bitmap (RGB565). See src/monalith.h for implementation.
 void showStaticBitmap(const uint16_t* bitmap);
 void clearStaticBitmap();
+// Non-blocking variant: copy the provided bitmap and display immediately without
+// running the long diagnostic sequence. Safe for quick tests.
+void showStaticBitmapFast(const uint16_t* bitmap);
 
 // Display state machine and control helpers
 enum class DisplayState {

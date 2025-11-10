@@ -1,0 +1,2 @@
+// disabled: tmp_full_white.ino
+// moved out of sketch root to avoid accidental multi-sketch build by arduino-cli
