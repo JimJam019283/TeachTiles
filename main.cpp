@@ -8,7 +8,26 @@
 // Include Arduino headers only when building for Arduino/ESP32
 #if defined(ARDUINO) || defined(ESP32)
 #include <Arduino.h>
-#define USE_BT 0 // set to 1 to enable BluetoothSerial (increase flash size)
+
+// Quick hardware test: compile a tiny firmware that simply initializes the
+// Monalith display and fills the 64x64 panel white. Define MATRIX_TEST_WHITE
+// to enable this mode. It disables Bluetooth, WiFi/ESP-NOW/UDP transports to
+// minimize code size and risk of exceeding flash during development.
+// Default to enabled so the immediate test can be compiled and flashed.
+#if !defined(MATRIX_TEST_WHITE)
+#define MATRIX_TEST_WHITE 1
+#endif
+
+// set USE_BT to 0 when running the lightweight matrix test to avoid pulling in
+// the BluetoothSerial library which increases firmware size significantly.
+#if !defined(USE_BT)
+#if MATRIX_TEST_WHITE
+#define USE_BT 0
+#else
+#define USE_BT 1
+#endif
+#endif
+
 #if USE_BT
 #include "BluetoothSerial.h"
 #endif
@@ -114,7 +133,33 @@ int main() {
 #endif
 
 #include "src/teachtiles.h"
+
+// Allow disabling the Monalith display subsystem to shrink firmware size for
+// tests that don't require the HUB75 panel. Set ENABLE_MONALITH to 1 to
+// compile the full visualizer (pulls in FastLED/PxMatrix and is large).
+#ifndef ENABLE_MONALITH
+#define ENABLE_MONALITH 1
+#endif
+
+#if ENABLE_MONALITH == 1
 #include "monalith/monalith.h"
+#else
+// When Monalith is disabled we must also avoid including the heavy
+// FastLED and PxMatrix libraries from the monalith_embed translation unit.
+// Provide minimal no-op Monalith symbols so calls compile but the
+// large display code is not linked into the final binary.
+namespace Monalith {
+    // Minimal enum matching the real API so callers like Monalith::DisplayState::StaticBitmap
+    // compile when the full visualizer is disabled.
+    enum class DisplayState : uint8_t { StaticBitmap = 0, Normal = 1 };
+    inline bool init() { return true; }
+    inline void showNote(uint8_t /*note*/, uint32_t /*duration*/) {}
+    inline void showStaticBitmap(const uint16_t* /*bmp*/) {}
+    inline void setDisplayState(DisplayState /*s*/) {}
+    inline void clearStaticBitmap() {}
+    inline void tick() {}
+}
+#endif
 
 #if defined(ESP32)
 #include <WiFi.h>
@@ -341,13 +386,21 @@ void setup() {
     if (!Monalith::init()) {
         Serial.println("Monalith init failed");
     }
-    // Short visual test: flash full red -> off -> full red (ESP32 only) so we can
-    // confirm the panel is connected and receiving data. This is temporary.
-#if defined(ESP32)
-    extern const uint16_t example_bitmap[]; // defined in example_bitmap.c
-    Monalith::showStaticBitmap(example_bitmap);
+    // If we're running the lightweight matrix-white test, skip all networking
+    // and Bluetooth setup and directly paint the panel white.
+#if MATRIX_TEST_WHITE
+    Serial.println("MATRIX_TEST_WHITE mode: filling panel white and idling");
+    // Create a tiny on-stack white bitmap (RGB565 64x64 = 4096 uint16_t)
+    static uint16_t white_bitmap[64*64];
+    for (size_t i = 0; i < (64*64); ++i) white_bitmap[i] = 0xFFFF; // white in RGB565
+    // Use the standard static bitmap blit (may run a short diagnostic) which
+    // is guaranteed to be linked in.
+    Monalith::showStaticBitmap(white_bitmap);
     Monalith::setDisplayState(Monalith::DisplayState::StaticBitmap);
+    // Done: do not start WiFi/ESP-NOW/UDP/BT
+    return;
 #else
+    // Short visual test: flash example bitmap (normal operation)
     extern const uint16_t example_bitmap[]; // defined in example_bitmap.c
     Monalith::showStaticBitmap(example_bitmap);
     Monalith::setDisplayState(Monalith::DisplayState::StaticBitmap);
@@ -369,6 +422,14 @@ void setup() {
 }
 
 void loop() {
+#if MATRIX_TEST_WHITE
+    // In MATRIX_TEST_WHITE mode we do nothing in loop — the static bitmap
+    // is already displayed. Keep the MCU idle but call Monalith::tick() in
+    // case the driver needs periodic servicing.
+    Monalith::tick();
+    delay(1000);
+    return;
+#endif
     // Read incoming bytes into rawBuf for optional hex dump
     rawBufLen = 0;
     while (Serial2.available()) {

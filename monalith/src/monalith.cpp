@@ -5,10 +5,80 @@
 #endif
 #include <cstdio>
 #include <cstdint>
-#define P_R1_PIN 26
 #include <vector>
 #include <algorithm>
-#define P_G1_PIN 27
+
+// Force the user's HUB75 pin mapping to ensure correct wiring is used.
+// This safely undefines any previous macros then defines the requested pins.
+#ifdef P_R1_PIN
+#undef P_R1_PIN
+#endif
+#define P_R1_PIN 26  // r1 - D26
+
+#ifdef P_G1_PIN
+#undef P_G1_PIN
+#endif
+#define P_G1_PIN 27  // g1 - D27
+
+#ifdef P_B1_PIN
+#undef P_B1_PIN
+#endif
+#define P_B1_PIN 32  // b1 - D32
+
+#ifdef P_R2_PIN
+#undef P_R2_PIN
+#endif
+#define P_R2_PIN 33  // r2 - D33
+
+#ifdef P_G2_PIN
+#undef P_G2_PIN
+#endif
+#define P_G2_PIN 25  // g2 - GPIO25
+
+#ifdef P_B2_PIN
+#undef P_B2_PIN
+#endif
+#define P_B2_PIN 13  // b2 - GPIO13
+
+#ifdef P_E_PIN
+#undef P_E_PIN
+#endif
+#define P_E_PIN 14   // E - GPIO14
+
+#ifdef P_A_PIN
+#undef P_A_PIN
+#endif
+#define P_A_PIN 23   // A - GPIO23
+
+#ifdef P_B_PIN
+#undef P_B_PIN
+#endif
+#define P_B_PIN 22   // B - GPIO22
+
+#ifdef P_C_PIN
+#undef P_C_PIN
+#endif
+#define P_C_PIN 21   // C - GPIO21
+
+#ifdef P_D_PIN
+#undef P_D_PIN
+#endif
+#define P_D_PIN 19   // D - GPIO19
+
+#ifdef P_CLK_PIN
+#undef P_CLK_PIN
+#endif
+#define P_CLK_PIN 18 // CLK - GPIO18
+
+#ifdef P_LAT_PIN
+#undef P_LAT_PIN
+#endif
+#define P_LAT_PIN 5  // LAT - GPIO5
+
+#ifdef P_OE_PIN
+#undef P_OE_PIN
+#endif
+#define P_OE_PIN 15  // OE - GPIO15
 // If compiling for Arduino/ESP32, attempt to use FastLED. Otherwise remain a host stub.
 #if defined(ARDUINO) && defined(ESP32)
 #define P_B1_PIN 32
