@@ -51,36 +51,19 @@ static CRGB leds[NUM_LEDS];
 #endif
 
 #if MONALITH_HAS_PXMATRIX
-// Pin mapping updated to user's ESP32 wiring
-// Mapping requested by user:
-// r1 - D26
-// G1 - D27
-// B1 - D32
-// GND - GND
-// r2 - d33
-// G2 - 25
-// B2 - 13
-// E - 14
-// A - 23
-// B - 22
-// C - 21
-// D - 19
-// CLK - 18
-// Lat - 5
-// OE - 15
-#define P_R1_PIN 26
-#define P_G1_PIN 27
-#define P_B1_PIN 32
-#define P_R2_PIN 33
-#define P_G2_PIN 25
+#define P_R1_PIN 25
+#define P_G1_PIN 26
+#define P_B1_PIN 27
+#define P_R2_PIN 14
+#define P_G2_PIN 12
 #define P_B2_PIN 13
-#define P_E_PIN 14
+#define P_E_PIN 32
 #define P_A_PIN 23
 #define P_B_PIN 22
-#define P_C_PIN 21
-#define P_D_PIN 19
-#define P_CLK_PIN 18
-#define P_LAT_PIN 5
+#define P_C_PIN 5
+#define P_D_PIN 18
+#define P_CLK_PIN 19
+#define P_LAT_PIN 4
 #define P_OE_PIN 15
 
 // Include P_E_PIN when constructing PxMATRIX in case the panel requires 5 address lines
