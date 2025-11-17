@@ -8,174 +8,27 @@
 #include <vector>
 #include <algorithm>
 
+// Disable FastLED backend for HUB75 tests to avoid pin conflicts when driving
+// PxMatrix/HUB75 directly from the ESP32. This forces the PxMatrix path only.
+#undef MONALITH_HAS_FASTLED
+#define MONALITH_HAS_FASTLED 0
+
 // Force the user's HUB75 pin mapping to ensure correct wiring is used.
 // This safely undefines any previous macros then defines the requested pins.
-#ifdef P_R1_PIN
-#undef P_R1_PIN
-#endif
-#define P_R1_PIN 26  // r1 - D26
-
-#ifdef P_G1_PIN
-#undef P_G1_PIN
-#endif
-#define P_G1_PIN 27  // g1 - D27
-
-#ifdef P_B1_PIN
-#undef P_B1_PIN
-#endif
-#define P_B1_PIN 32  // b1 - D32
-
-#ifdef P_R2_PIN
-#undef P_R2_PIN
-#endif
-#define P_R2_PIN 33  // r2 - D33
-
-#ifdef P_G2_PIN
-#undef P_G2_PIN
-#endif
-#define P_G2_PIN 25  // g2 - GPIO25
-
-#ifdef P_B2_PIN
-#undef P_B2_PIN
-#endif
-#define P_B2_PIN 13  // b2 - GPIO13
-
-#ifdef P_E_PIN
-#undef P_E_PIN
-#endif
-#define P_E_PIN 14   // E - GPIO14
-
-#ifdef P_A_PIN
-#undef P_A_PIN
-#endif
-#define P_A_PIN 23   // A - GPIO23
-
-#ifdef P_B_PIN
-#undef P_B_PIN
-#endif
-#define P_B_PIN 22   // B - GPIO22
-
-#ifdef P_C_PIN
-#undef P_C_PIN
-#endif
-#define P_C_PIN 21   // C - GPIO21
-
-#ifdef P_D_PIN
-#undef P_D_PIN
-#endif
-#define P_D_PIN 19   // D - GPIO19
-
-#ifdef P_CLK_PIN
-#undef P_CLK_PIN
-#endif
-#define P_CLK_PIN 18 // CLK - GPIO18
-
-#ifdef P_LAT_PIN
-#undef P_LAT_PIN
-#endif
-#define P_LAT_PIN 5  // LAT - GPIO5
-
-#ifdef P_OE_PIN
-#undef P_OE_PIN
-#endif
-#define P_OE_PIN 15  // OE - GPIO15
-// If compiling for Arduino/ESP32, attempt to use FastLED. Otherwise remain a host stub.
-#if defined(ARDUINO) && defined(ESP32)
-#define P_B1_PIN 32
-#define P_R2_PIN 33
-#define MONALITH_HAS_FASTLED 1
-#else
-#define P_R2_PIN 33
-#endif
-
-#define P_G2_PIN 25
-#ifndef USE_PXMATRIX
-#if defined(ESP32)
+#define P_R1_PIN 25
+#define P_G1_PIN 26
+#define P_B1_PIN 27
+#define P_R2_PIN 14
+#define P_G2_PIN 12
 #define P_B2_PIN 13
-#else
-#define USE_PXMATRIX 0
-#define P_E_PIN 14
-#endif
-#endif
-// Optional HUB75 parallel panel support via PxMatrix. Enable with -DUSE_PXMATRIX
-
-// with USE_PXMATRIX enabled. This avoids CI/host builds trying to find PxMatrix.h.
-#if defined(USE_PXMATRIX) && defined(ESP32)
+#define P_E_PIN 32
 #define P_A_PIN 23
 #define P_B_PIN 22
-#include <soc/gpio_struct.h>
-#include <PxMatrix.h>
-#define P_C_PIN 21
-#else
-#define MONALITH_HAS_PXMATRIX 0
-#define P_D_PIN 19
-
-// Forward-declare millis() for host builds; main.cpp provides a host stub when not on ESP32.
-#define P_CLK_PIN 18
-
-namespace Monalith {
-#define P_LAT_PIN 5
-// Simple configuration - adjust for your matrix
-// Configuration - change these to match your hardware
+#define P_C_PIN 5
+#define P_D_PIN 17
+#define P_CLK_PIN 16
+#define P_LAT_PIN 4
 #define P_OE_PIN 15
-static const int WIDTH = 64;
-static const int HEIGHT = 64;
-static const int NUM_LEDS = WIDTH * HEIGHT; // 4096
-#define P_A_PIN 23
-#define P_B_PIN 22
-static const int LED_PIN = 5;
-static CRGB leds[NUM_LEDS];
-#endif
-
-#if MONALITH_HAS_PXMATRIX
-// Default example pin mapping for HUB75 on ESP32 - adjusted to user's wiring.
-// We'll define the pins if not already provided via build flags.
-#ifndef P_R1_PIN
-#define P_R1_PIN 26
-#endif
-#ifndef P_G1_PIN
-#define P_G1_PIN 27
-#endif
-#ifndef P_B1_PIN
-#define P_B1_PIN 32
-#endif
-#ifndef P_R2_PIN
-#define P_R2_PIN 33
-#endif
-#ifndef P_G2_PIN
-#define P_G2_PIN 25
-#endif
-#ifndef P_B2_PIN
-#define P_B2_PIN 13
-#endif
-#ifndef P_E_PIN
-#define P_E_PIN 14
-#endif
-#ifndef P_A_PIN
-#define P_A_PIN 23
-#endif
-#ifndef P_B_PIN
-#define P_B_PIN 22
-#endif
-#ifndef P_C_PIN
-#define P_C_PIN 21
-#endif
-#ifndef P_D_PIN
-#define P_D_PIN 19
-#endif
-#ifndef P_CLK_PIN
-#define P_CLK_PIN 18
-#endif
-#ifndef P_LAT_PIN
-#define P_LAT_PIN 5
-#endif
-#ifndef P_OE_PIN
-#define P_OE_PIN 15
-#endif
-
-// Include P_E_PIN when constructing PxMATRIX in case the panel requires 5 address lines
-static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN, P_E_PIN);
-#endif
 
 // Extended active note: support velocity (0-127) and a trail intensity
 struct ActiveNote { int idx; uint8_t hue; uint8_t vel; uint32_t expire_ms; uint8_t trail_level; };

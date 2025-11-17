@@ -61,8 +61,8 @@ static CRGB leds[NUM_LEDS];
 #define P_A_PIN 23
 #define P_B_PIN 22
 #define P_C_PIN 5
-#define P_D_PIN 18
-#define P_CLK_PIN 19
+#define P_D_PIN 17
+#define P_CLK_PIN 16
 #define P_LAT_PIN 4
 #define P_OE_PIN 15
 
@@ -184,7 +184,10 @@ bool init() {
     std::printf("Monalith: forced OE=%d LAT=%d CLK=%d\n", digitalRead(P_OE_PIN), digitalRead(P_LAT_PIN), digitalRead(P_CLK_PIN));
 
     // initialize PxMatrix frame buffer and set reasonable brightness
-    matrix.begin();
+    // Provide explicit row scan (1/16). If your panel is 1/8 scan,
+    // change the first argument to 8. (PxMatrix begin() signatures vary by
+    // library version; use the single-arg form here for portability.)
+    matrix.begin(16);
     matrix.setBrightness(50);
     matrix.clearDisplay();
     matrix.display();
