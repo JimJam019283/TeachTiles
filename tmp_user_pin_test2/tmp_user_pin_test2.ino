@@ -15,7 +15,7 @@ const uint16_t HEIGHT = 64;
 #define P_B2_PIN   13
 // Right side
 #define P_A_PIN    23
-#define P_B_PIN    22
+#define P_B_PIN    19
 #define P_C_PIN    5
 #define P_D_PIN    18
 #define P_CLK_PIN  19

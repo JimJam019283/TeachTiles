@@ -16,7 +16,7 @@ patch_mon_pins() {
     echo "patch_mon_pins: $MON_CPP not found, skipping"
     return 0
   fi
-  python3 - <<'PY'
+  python3 - <<PY
 from pathlib import Path
 p = Path(r"$MON_CPP")
 text = p.read_text()
@@ -39,7 +39,7 @@ new_defs = '''#if MONALITH_HAS_PXMATRIX
 #define P_B2_PIN 13
 #define P_E_PIN 32
 #define P_A_PIN 23
-#define P_B_PIN 22
+#define P_B_PIN 19
 #define P_C_PIN 5
 #define P_D_PIN 17
 #define P_CLK_PIN 16
@@ -72,9 +72,12 @@ while [ ! -f /tmp/teachtiles_autotest.stop ]; do
   echo "Binary: $BINPATH"
 
   echo "Uploading..."
-  if ! arduino-cli upload -p "$PORT" --fqbn esp32:esp32:esp32 "$SKETCH_DIR" >/tmp/teachtiles_upload.log 2>&1; then
-    echo "Upload failed, saving /tmp/teachtiles_upload.log to $LOGDIR/upload_fail_$ITER.log"
-    cp /tmp/teachtiles_upload.log "$LOGDIR/upload_fail_$ITER.log"
+  # write upload output both to /tmp and to workspace build_logs for inspection
+  UP_TMP=/tmp/teachtiles_upload.log
+  UP_LOG="$LOGDIR/upload_cmd_last.log"
+  if ! (arduino-cli upload -p "$PORT" --upload-speed 115200 --fqbn esp32:esp32:esp32 "$SKETCH_DIR" 2>&1 | tee "$UP_TMP" "$UP_LOG") ; then
+    echo "Upload failed, saving $UP_TMP to $LOGDIR/upload_fail_$ITER.log"
+    cp "$UP_TMP" "$LOGDIR/upload_fail_$ITER.log"
     sleep 5
     continue
   fi

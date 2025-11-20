@@ -1,3 +1,4 @@
+#define USE_PXMATRIX 1
 #include "../monalith/monalith.h"
 
 static const uint16_t WHITE = 0xFFFF;
@@ -11,8 +12,8 @@ void setup() {
   bool ok = Monalith::init();
   Serial.print("white_fast_test: Monalith::init() -> ");
   Serial.println(ok ? "true" : "false");
-  Monalith::showStaticBitmapFast(whiteBitmap);
-  Serial.println("white_fast_test: showStaticBitmapFast called");
+  Monalith::showStaticBitmap(whiteBitmap);
+  Serial.println("white_fast_test: showStaticBitmap called");
 }
 
 void loop() { delay(1000); }

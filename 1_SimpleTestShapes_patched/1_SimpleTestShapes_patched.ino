@@ -88,10 +88,16 @@ void drawText(int colorWheelOffset)
 void setup() {
 
   // Module configuration
-  // Use explicit pin mapping from user attachment:
+  // Original mapping (kept for reference):
   // R1=25,G1=26,B1=27,R2=14,G2=12,B2=13,A=23,B=22,C=5,D=18,E=32,CLK=4,LAT=0,OE=15
+  // NOTE: the HUB75_I2S_CFG::i2s_pins order is {R1,G1,B1,R2,G2,B2,A,B,C,D,E,LAT,OE,CLK}
+  // The original initializer below may have LAT/CLK/AE swapped depending on comment ordering.
   HUB75_I2S_CFG::i2s_pins _pins = {25, 26, 27, 14, 12, 13, 23, 22, 5, 18, 32, 0, 15, 4};
-  HUB75_I2S_CFG mxconfig(PANEL_RES_X, PANEL_RES_Y, PANEL_CHAIN, _pins);
+  // Alternate common Waveshare mapping to try (LAT on GPIO4, CLK on GPIO16, D on GPIO17):
+  // i2s_pins = {R1,G1,B1,R2,G2,B2,A,B,C,D,E,LAT,OE,CLK}
+  HUB75_I2S_CFG::i2s_pins _pins_alt = {25, 26, 27, 14, 12, 13, 23, 22, 5, 17, 32, 4, 15, 16};
+  // Swap to _pins_alt if your panel's ribbon maps LAT/CLK differently.
+  HUB75_I2S_CFG mxconfig(PANEL_RES_X, PANEL_RES_Y, PANEL_CHAIN, _pins_alt);
 
   //mxconfig.gpio.e = 18;
   //mxconfig.clkphase = false;
