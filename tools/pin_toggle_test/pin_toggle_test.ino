@@ -9,7 +9,7 @@
 #define P_B2_PIN 13
 #define P_A_PIN 23
 #define P_B_PIN 19
-#define P_C_PIN 21
+#define P_C_PIN 5
 #define P_D_PIN 18
 #define P_E_PIN 14
 #define P_CLK_PIN 19

@@ -13,6 +13,14 @@
 #undef MONALITH_HAS_FASTLED
 #define MONALITH_HAS_FASTLED 0
 
+// Enable PxMatrix for HUB75 panels
+#if defined(ARDUINO) && defined(ESP32)
+#include <PxMatrix.h>
+#define MONALITH_HAS_PXMATRIX 1
+#else
+#define MONALITH_HAS_PXMATRIX 0
+#endif
+
 // Force the user's HUB75 pin mapping to ensure correct wiring is used.
 // This safely undefines any previous macros then defines the requested pins.
 #define P_R1_PIN 25
@@ -23,12 +31,17 @@
 #define P_B2_PIN 13
 #define P_E_PIN 32
 #define P_A_PIN 23
-#define P_B_PIN 22
+#define P_B_PIN 19
 #define P_C_PIN 5
 #define P_D_PIN 17
 #define P_CLK_PIN 16
 #define P_LAT_PIN 4
 #define P_OE_PIN 15
+
+#if MONALITH_HAS_PXMATRIX
+// Create PxMatrix instance with the correct pins for 64x64 panel
+static PxMATRIX matrix(WIDTH, HEIGHT, P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN, P_E_PIN);
+#endif
 
 // Extended active note: support velocity (0-127) and a trail intensity
 struct ActiveNote { int idx; uint8_t hue; uint8_t vel; uint32_t expire_ms; uint8_t trail_level; };
@@ -58,15 +71,30 @@ bool init() {
     FastLED.clear();
     FastLED.show();
     std::puts("Monalith: FastLED initialized");
-#else
-    std::puts("Monalith: init (host stub)");
 #endif
     activeNotes.clear();
 #if MONALITH_HAS_PXMATRIX
+    // Force-panel control pins to outputs early
+    pinMode(P_OE_PIN, OUTPUT);
+    pinMode(P_LAT_PIN, OUTPUT);
+    pinMode(P_CLK_PIN, OUTPUT);
+    digitalWrite(P_OE_PIN, LOW);  // enable panel
+    digitalWrite(P_LAT_PIN, LOW);
+    digitalWrite(P_CLK_PIN, LOW);
+    
+    // Initialize PxMatrix with 1/32 scan for 64x64 panel
+    matrix.begin(32);
+    matrix.setBrightness(255);
+    matrix.clearDisplay();
+    matrix.display();
+    
+    std::puts("Monalith: PxMatrix (HUB75) initialized");
     // Print configured pin mapping for verification
     std::printf("Monalith: PxMatrix pins LAT=%d OE=%d A=%d B=%d C=%d D=%d CLK=%d R1=%d G1=%d B1=%d R2=%d G2=%d B2=%d E=%d\n",
                 P_LAT_PIN, P_OE_PIN, P_A_PIN, P_B_PIN, P_C_PIN, P_D_PIN, P_CLK_PIN,
                 P_R1_PIN, P_G1_PIN, P_B1_PIN, P_R2_PIN, P_G2_PIN, P_B2_PIN, P_E_PIN);
+#else
+    std::puts("Monalith: init (host stub)");
 #endif
     return true;
 }
