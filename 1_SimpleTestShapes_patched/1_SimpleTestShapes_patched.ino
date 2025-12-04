@@ -4,170 +4,115 @@
 //
 
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
+// Include Monalith API and the generated bitmap
+#include "../monalith/src/monalith.h"
+#include "example_bitmap.c"
+// Include monalith implementation directly so the sketch links the display helpers
+#include "../monalith/src/monalith.cpp"
 
 
 #define PANEL_RES_X 64      // Number of pixels wide of each INDIVIDUAL panel module. 
-#define PANEL_RES_Y 32     // Number of pixels tall of each INDIVIDUAL panel module.
+#define PANEL_RES_Y 64     // Number of pixels tall of each INDIVIDUAL panel module.
 #define PANEL_CHAIN 1      // Total number of panels chained one to another
  
 //MatrixPanel_I2S_DMA dma_display;
-MatrixPanel_I2S_DMA *dma_display = nullptr;
-
+// Use Monalith's internal PxMatrix instance instead of creating a second
+// MatrixPanel_I2S_DMA instance here which can conflict and cause striping.
+// The Monalith library manages its own `matrix` object.
 uint16_t myBLACK, myWHITE, myRED, myGREEN, myBLUE;
+uint16_t testBuffer[64*64];  // Global test buffer for color cycling
 
 // Input a value 0 to 255 to get a color value.
 // The colours are a transition r - g - b - back to r.
 // From: https://gist.github.com/davidegironi/3144efdc6d67e5df55438cc3cba613c8
 uint16_t colorWheel(uint8_t pos) {
+  auto color565_from_rgb = [](uint8_t r, uint8_t g, uint8_t b)->uint16_t {
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+  };
   if(pos < 85) {
-    return dma_display->color565(pos * 3, 255 - pos * 3, 0);
+    return color565_from_rgb(pos * 3, 255 - pos * 3, 0);
   } else if(pos < 170) {
     pos -= 85;
-    return dma_display->color565(255 - pos * 3, 0, pos * 3);
+    return color565_from_rgb(255 - pos * 3, 0, pos * 3);
   } else {
     pos -= 170;
-    return dma_display->color565(0, pos * 3, 255 - pos * 3);
+    return color565_from_rgb(0, pos * 3, 255 - pos * 3);
   }
 }
 
-void drawText(int colorWheelOffset)
+void drawText(int /*colorWheelOffset*/)
 {
-  
-  // draw text with a rotating colour
-  dma_display->setTextSize(1);     // size 1 == 8 pixels high
-  dma_display->setTextWrap(false); // Don't wrap at end of line - will do ourselves
-
-  dma_display->setCursor(5, 0);    // start at top left, with 8 pixel of spacing
-  uint8_t w = 0;
-  const char *str = "ESP32 DMA";
-  for (w=0; w<strlen(str); w++) {
-    dma_display->setTextColor(colorWheel((w*32)+colorWheelOffset));
-    dma_display->print(str[w]);
-  }
-
-  dma_display->println();
-  dma_display->print(" ");
-  for (w=9; w<18; w++) {
-    dma_display->setTextColor(colorWheel((w*32)+colorWheelOffset));
-    dma_display->print("*");
-  }
-  
-  dma_display->println();
-
-  dma_display->setTextColor(dma_display->color444(15,15,15));
-  dma_display->println("LED MATRIX!");
-
-  // print each letter with a fixed rainbow color
-  dma_display->setTextColor(dma_display->color444(0,8,15));
-  dma_display->print('3');
-  dma_display->setTextColor(dma_display->color444(15,4,0));
-  dma_display->print('2');
-  dma_display->setTextColor(dma_display->color444(15,15,0));
-  dma_display->print('x');
-  dma_display->setTextColor(dma_display->color444(8,15,0));
-  dma_display->print('6');
-  dma_display->setTextColor(dma_display->color444(8,0,15));
-  dma_display->print('4');
-
-  // Jump a half character
-  dma_display->setCursor(34, 24);
-  dma_display->setTextColor(dma_display->color444(0,15,15));
-  dma_display->print("*");
-  dma_display->setTextColor(dma_display->color444(15,0,0));
-  dma_display->print('R');
-  dma_display->setTextColor(dma_display->color444(0,15,0));
-  dma_display->print('G');
-  dma_display->setTextColor(dma_display->color444(0,0,15));
-  dma_display->print("B");
-  dma_display->setTextColor(dma_display->color444(15,0,8));
-  dma_display->println("*");
-
+  // Text rendering is disabled in this test build to avoid referencing the
+  // DMA driver; Monalith's PxMatrix is used for the bitmap display instead.
 }
 
 
 void setup() {
 
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("\n\n=== SimpleTestShapes with Debug ===");
+
   // Module configuration
-  // Original mapping (kept for reference):
-  // R1=25,G1=26,B1=27,R2=14,G2=12,B2=13,A=23,B=22,C=5,D=18,E=32,CLK=4,LAT=0,OE=15
+  // R1=25,G1=26,B1=27,R2=14,G2=12,B2=13,A=23,B=19,C=5,D=17,E=32,CLK=16,LAT=4,OE=15
   // NOTE: the HUB75_I2S_CFG::i2s_pins order is {R1,G1,B1,R2,G2,B2,A,B,C,D,E,LAT,OE,CLK}
-  // The original initializer below may have LAT/CLK/AE swapped depending on comment ordering.
-  HUB75_I2S_CFG::i2s_pins _pins = {25, 26, 27, 14, 12, 13, 23, 22, 5, 18, 32, 0, 15, 4};
-  // Alternate common Waveshare mapping to try (LAT on GPIO4, CLK on GPIO16, D on GPIO17):
-  // i2s_pins = {R1,G1,B1,R2,G2,B2,A,B,C,D,E,LAT,OE,CLK}
-  HUB75_I2S_CFG::i2s_pins _pins_alt = {25, 26, 27, 14, 12, 13, 23, 22, 5, 17, 32, 4, 15, 16};
-  // Swap to _pins_alt if your panel's ribbon maps LAT/CLK differently.
-  HUB75_I2S_CFG mxconfig(PANEL_RES_X, PANEL_RES_Y, PANEL_CHAIN, _pins_alt);
-
-  //mxconfig.gpio.e = 18;
-  //mxconfig.clkphase = false;
-  //mxconfig.driver = HUB75_I2S_CFG::FM6126A;
-
-  // Display Setup
-  dma_display = new MatrixPanel_I2S_DMA(mxconfig);
-  dma_display->begin();
-  dma_display->setBrightness8(90); //0-255
-  dma_display->clearScreen();
-
-  myBLACK = dma_display->color565(0, 0, 0);
-  myWHITE = dma_display->color565(255, 255, 255);
-  myRED = dma_display->color565(255, 0, 0);
-  myGREEN = dma_display->color565(0, 255, 0);
-  myBLUE = dma_display->color565(0, 0, 255);
+  Serial.println("Creating pin configuration...");
+  HUB75_I2S_CFG::i2s_pins _pins = {25, 26, 27, 14, 12, 13, 23, 19, 5, 17, 32, 4, 15, 16};
+  HUB75_I2S_CFG mxconfig(PANEL_RES_X, PANEL_RES_Y, PANEL_CHAIN, _pins);
   
+  // CRITICAL: 64×64 panels need E pin explicitly set for 1/32 scan
+  Serial.println("Setting E pin...");
+  mxconfig.gpio.e = 32;  // Force E pin to GPIO32
 
-  dma_display->fillScreen(myWHITE);
+  // Initialize Monalith (this sets up PxMatrix with the pin mapping
+  // compiled into the library). Avoid instantiating another driver here
+  // as it will fight over the panel signals and produce striping.
+  Serial.println("Calling Monalith::init()...");
+  Monalith::init();
+  Serial.println("Monalith::init() complete!");
+
+  // Set basic colour constants matching RGB565
+  myBLACK = 0x0000;
+  myWHITE = 0xFFFF;
+  myRED = 0xF800;
+  myGREEN = 0x07E0;
+  myBLUE = 0x001F;
+
+  // Create a test buffer filled with solid color
   
-  // fix the screen with green
-  dma_display->fillRect(0, 0, dma_display->width(), dma_display->height(), dma_display->color444(0, 15, 0));
-  delay(500);
-
-  // draw a box in yellow
-  dma_display->drawRect(0, 0, dma_display->width(), dma_display->height(), dma_display->color444(15, 15, 0));
-  delay(500);
-
-  // draw an 'X' in red
-  dma_display->drawLine(0, 0, dma_display->width()-1, dma_display->height()-1, dma_display->color444(15, 0, 0));
-  dma_display->drawLine(dma_display->width()-1, 0, 0, dma_display->height()-1, dma_display->color444(15, 0, 0));
-  delay(500);
-
-  // draw a blue circle
-  dma_display->drawCircle(10, 10, 10, dma_display->color444(0, 0, 15));
-  delay(500);
-
-  // fill a violet circle
-  dma_display->fillCircle(40, 21, 10, dma_display->color444(15, 0, 15));
-  delay(500);
-
-  // fill the screen with 'black'
-  dma_display->fillScreen(dma_display->color444(0, 0, 0));
-
-  //drawText(0);
+  // Fill with solid red for initial test
+  Serial.println("Filling test buffer with red...");
+  for (int i = 0; i < 64*64; i++) {
+    testBuffer[i] = myRED; // 0xF800
+  }
+  
+  // Display using non-blocking fast method (proven to work)
+  Serial.println("Calling Monalith::showStaticBitmapFast()...");
+  Monalith::showStaticBitmapFast(testBuffer);
+  Serial.println("showStaticBitmapFast complete!");
 
 }
 
 uint8_t wheelval = 0;
 void loop() {
-
-    // animate by going through the colour wheel for the first two lines
-    drawText(wheelval);
-    wheelval +=1;
-
-    delay(20); 
-/*
-  drawText(0);
-  delay(2000);
-  dma_display->clearScreen();
-  dma_display->fillScreen(myBLACK);
-  delay(2000);
-  dma_display->fillScreen(myBLUE);
-  delay(2000);
-  dma_display->fillScreen(myRED);
-  delay(2000);
-  dma_display->fillScreen(myGREEN);
-  delay(2000);
-  dma_display->fillScreen(myWHITE);
-  dma_display->clearScreen();
-  */
+  // Cycle through colors every 3 seconds to verify the panel works
+  static uint32_t lastChange = 0;
+  static uint8_t colorIndex = 0;
+  uint16_t colors[] = {myRED, myGREEN, myBLUE, myWHITE};
   
+  if (millis() - lastChange > 3000) {
+    lastChange = millis();
+    colorIndex = (colorIndex + 1) % 4;
+    
+    // Fill buffer with new color
+    for (int i = 0; i < 64*64; i++) {
+      testBuffer[i] = colors[colorIndex];
+    }
+    
+    // Display it
+    Monalith::showStaticBitmapFast(testBuffer);
+    Serial.printf("Color: %d\n", colorIndex);
+  }
+  
+  delay(100);
 }
