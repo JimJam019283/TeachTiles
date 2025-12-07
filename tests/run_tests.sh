@@ -9,7 +9,9 @@ for f in "$ROOT"/tests/test_*.cpp; do
   out="$OUTDIR/$name"
   echo "Compiling $name..."
   # Link the test with main.cpp and test helper that defines host-side symbols
-  /usr/bin/g++ -g -std=c++17 -I"$ROOT" -I"$ROOT/monalith" -DTEST_RUNNER -o "$out" "$f" "$ROOT/main.cpp" "$ROOT/tests/helpers_transport.cpp" "$ROOT/monalith/monalith.cpp" -pthread
+  # Disable Monalith to avoid hardware dependencies during host-side testing
+  # Include example_bitmap.c for the symbol reference in main.cpp
+  /usr/bin/g++ -g -std=c++17 -I"$ROOT" -I"$ROOT/monalith" -DTEST_RUNNER -DENABLE_MONALITH=0 -o "$out" "$f" "$ROOT/main.cpp" "$ROOT/tests/helpers_transport.cpp" "$ROOT/example_bitmap.c" -pthread
   echo "Running $name..."
   "$out"
 done
