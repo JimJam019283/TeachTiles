@@ -9,6 +9,10 @@
 //   3. Run: python3 scripts/midi_to_esp32.py
 //   4. Play piano - notes appear on display!
 
+// Disable brownout detector - LED matrix can cause voltage drops during init
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 
 // Include the TeachTiles bitmap overlay
@@ -526,6 +530,9 @@ void processMIDI() {
 }
 
 void setup() {
+  // Disable brownout detector - LED matrix causes voltage drops during init
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  
   Serial.begin(115200);
   delay(1000);
   Serial.println("\n\n========================================");
