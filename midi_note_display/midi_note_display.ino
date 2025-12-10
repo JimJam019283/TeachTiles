@@ -109,12 +109,13 @@ enum OctaveShift {
 
 // Displayable range constants
 // Full piano range we want to support: C2 (MIDI 36) to C7 (MIDI 96)
-// Display can show: C2 (Y=59) to about F5/G5 (Y=5-7) directly
-// Notes above ~G5 will be transposed down with up-arrow indicator
+// Display can show: G2 (Y=52) to about F5 (Y=11) directly
+// Notes at G5 and above will be transposed down with up-arrow indicator
+// Notes at F#2 and below will be transposed up with down-arrow indicator
 const uint8_t PIANO_MIN_NOTE = 36;   // C2 - lowest note on your piano  
 const uint8_t PIANO_MAX_NOTE = 96;   // C7 - highest note on your piano
-const uint8_t DISPLAY_MIN_NOTE = 36; // C2 - bottom ledger lines of bass clef (Y=59)
-const uint8_t DISPLAY_MAX_NOTE = 79; // G5 - top of treble clef area (Y=5)
+const uint8_t DISPLAY_MIN_NOTE = 43; // G2 - bottom line of bass clef (Y=52), F#2 and below shows arrow
+const uint8_t DISPLAY_MAX_NOTE = 77; // F5 - top of treble clef area (Y=11), G5+ shows arrow
 
 // Note names for serial output
 const char* NOTE_NAMES[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
