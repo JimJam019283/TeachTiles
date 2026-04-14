@@ -13,9 +13,19 @@
 // Monalith display and fills the 64x64 panel white. Define MATRIX_TEST_WHITE
 // to enable this mode. It disables Bluetooth, WiFi/ESP-NOW/UDP transports to
 // minimize code size and risk of exceeding flash during development.
-// Default to enabled so the immediate test can be compiled and flashed.
+// Keep disabled by default so normal firmware can receive bridge data.
 #if !defined(MATRIX_TEST_WHITE)
-#define MATRIX_TEST_WHITE 1
+#define MATRIX_TEST_WHITE 0
+#endif
+
+#if defined(ESP32)
+#if !defined(ENABLE_REMOTE_TRANSPORTS)
+#define ENABLE_REMOTE_TRANSPORTS 0
+#endif
+#else
+#if !defined(ENABLE_REMOTE_TRANSPORTS)
+#define ENABLE_REMOTE_TRANSPORTS 1
+#endif
 #endif
 
 // set USE_BT to 0 when running the lightweight matrix test to avoid pulling in
@@ -23,12 +33,14 @@
 #if !defined(USE_BT)
 #if MATRIX_TEST_WHITE
 #define USE_BT 0
+#elif !ENABLE_REMOTE_TRANSPORTS
+#define USE_BT 0
 #else
 #define USE_BT 1
 #endif
 #endif
 
-#if USE_BT
+#if USE_BT && ENABLE_REMOTE_TRANSPORTS
 #include "BluetoothSerial.h"
 #endif
 #include <stdint.h>
@@ -161,7 +173,7 @@ namespace Monalith {
 }
 #endif
 
-#if defined(ESP32)
+#if defined(ESP32) && ENABLE_REMOTE_TRANSPORTS
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_now.h>
@@ -243,7 +255,7 @@ const uint16_t router_port __attribute__((unused)) = 5005;
 #if defined(ESP32)
 #include "HardwareSerial.h"
 // Serial2 instance is provided by the ESP32 Arduino core; don't redefine it here.
-#if USE_BT
+#if USE_BT && ENABLE_REMOTE_TRANSPORTS
 BluetoothSerial SerialBT;
 #endif
 #endif
@@ -276,6 +288,74 @@ int lastRxPinState = -1;
 // Pin check timing
 uint32_t lastPinCheckMillis = 0;
 
+void processMidiByte(uint8_t byte) {
+    if (rawBufLen < sizeof(rawBuf)) rawBuf[rawBufLen++] = byte;
+
+    // MIDI message parsing (only note-on and note-off)
+    if (byte & 0x80) {
+        midiStatus = byte;
+        midiState = WAIT_NOTE;
+        return;
+    }
+
+    switch (midiState) {
+        case WAIT_NOTE:
+            midiNote = byte;
+            midiState = WAIT_VELOCITY;
+            break;
+        case WAIT_VELOCITY:
+            lastReceivedMillis = millis();
+            signalPresent = true;
+
+            if ((midiStatus & 0xF0) == 0x90 && byte > 0) {
+                uint32_t t = millis();
+                if (t == 0) t = 1;
+                noteOnTime[midiNote] = t;
+                currentPlayingNote = midiNote;
+                currentVelocityVal = byte;
+                currentNoteStart = noteOnTime[midiNote];
+                Serial.printf("Signal: true | Note: %s (%d) | Velocity: %d | State: ON\n", midiNoteToName(midiNote), midiNote, currentVelocityVal);
+            } else if (((midiStatus & 0xF0) == 0x80) || ((midiStatus & 0xF0) == 0x90 && byte == 0)) {
+                uint32_t now = millis();
+                uint32_t duration = 0;
+                if (noteOnTime[midiNote] != 0) {
+                    duration = now - noteOnTime[midiNote];
+                    if (duration == 0) duration = 1;
+                }
+                Serial.printf("Signal: true | Note: %s (%d) | Velocity: %d | State: OFF | Duration: %lu ms\n", midiNoteToName(midiNote), midiNote, (unsigned)byte, duration);
+                if (noteOnTime[midiNote] != 0) {
+                    sendNoteData(midiNote, duration);
+                } else {
+                    Serial.printf("(info) Ignored OFF for note %d with no prior ON\n", midiNote);
+                }
+                noteOnTime[midiNote] = 0;
+                if (currentPlayingNote == midiNote) {
+                    currentPlayingNote = -1;
+                    currentVelocityVal = 0;
+                    currentNoteStart = 0;
+                }
+            }
+            midiState = WAIT_NOTE;
+            break;
+        default:
+            midiState = WAIT_STATUS;
+            break;
+    }
+}
+
+void processIncomingMidi() {
+    while (Serial2.available()) {
+        processMidiByte(Serial2.read());
+    }
+
+#if defined(ESP32)
+    // Raspberry Pi bridge writes raw MIDI bytes over the ESP32 USB serial port.
+    while (Serial.available()) {
+        processMidiByte((uint8_t)Serial.read());
+    }
+#endif
+}
+
 // Helper: convert MIDI note number to note name (e.g., 60 -> C4)
 const char* midiNoteToName(uint8_t note) {
     static char buf[8];
@@ -286,6 +366,11 @@ const char* midiNoteToName(uint8_t note) {
     return buf;
 }
 void sendNoteData(uint8_t note, uint32_t duration) {
+#if defined(ESP32) && !ENABLE_REMOTE_TRANSPORTS
+    Monalith::showNote(note, duration);
+    return;
+#endif
+
     // Package: [note, duration (ms, 4 bytes)]
     uint8_t packet[5];
     packet[0] = note;
@@ -306,6 +391,7 @@ void sendNoteData(uint8_t note, uint32_t duration) {
 #else
     Serial.printf("(bt disabled) would send packet for note %d dur %lu\n", packet[0], (unsigned long)duration);
 #endif
+#if ENABLE_REMOTE_TRANSPORTS
     } else if (transport == TM_ESPNOW) {
 #if defined(ESP32)
         if (memcmp(espnow_peer_mac, (uint8_t[]){0,0,0,0,0,0}, 6) != 0) {
@@ -327,6 +413,7 @@ void sendNoteData(uint8_t note, uint32_t duration) {
         // Host fallback: SerialBT captures
         SerialBT.write(packet, 5);
 #endif
+    #endif
     }
 }
 void setup() {
@@ -336,7 +423,7 @@ void setup() {
     // you may need to use SERIAL_8N1 (default) or invert wiring/driver. If you used a raw 3
     // earlier, that may not be portable across cores; use the Arduino constant instead.
     Serial2.begin(MIDI_BAUDRATE, SERIAL_8N1, MIDI_RX_PIN, -1); // host stub ignores args
-#if USE_BT
+#if USE_BT && ENABLE_REMOTE_TRANSPORTS
     if (!SerialBT.begin("TeachTile")) {
         Serial.println("Failed to start Bluetooth");
     } else {
@@ -357,6 +444,7 @@ void setup() {
     // Configure RX pin input pullup so we can sense electrical transitions for debugging
     pinMode(MIDI_RX_PIN, INPUT_PULLUP);
     lastRxPinState = digitalRead(MIDI_RX_PIN);
+#if ENABLE_REMOTE_TRANSPORTS
     // Initialize transport-specific networking
     // Initialize ESP-NOW so this board can receive ESPNOW packets even if we prefer BT.
     // That lets us use ESP-NOW as an additional wireless transport alongside Bluetooth SPP.
@@ -380,6 +468,9 @@ void setup() {
         }
     }
 #else
+    Serial.println("Remote transports disabled; listening for Pi bridge over USB serial");
+#endif
+#else
     Serial.println("Ready to receive MIDI...");
 #endif
     // Initialize Monalith visualizer
@@ -401,9 +492,11 @@ void setup() {
     return;
 #else
     // Short visual test: flash example bitmap (normal operation)
+#if !defined(TEST_RUNNER)
     extern const uint16_t example_bitmap[]; // defined in example_bitmap.c
     Monalith::showStaticBitmap(example_bitmap);
     Monalith::setDisplayState(Monalith::DisplayState::StaticBitmap);
+#endif
 #endif
     // Auto-clear the static bitmap after 60 seconds so the overlay is visible
     // for a measured period and then the display returns to normal behavior.
@@ -432,65 +525,7 @@ void loop() {
 #endif
     // Read incoming bytes into rawBuf for optional hex dump
     rawBufLen = 0;
-    while (Serial2.available()) {
-        uint8_t byte = Serial2.read();
-        if (rawBufLen < sizeof(rawBuf)) rawBuf[rawBufLen++] = byte;
-
-        // MIDI message parsing (only note-on and note-off)
-        if (byte & 0x80) { // Status byte
-            midiStatus = byte;
-            midiState = WAIT_NOTE;
-        } else {
-            switch (midiState) {
-                case WAIT_NOTE:
-                    midiNote = byte;
-                    midiState = WAIT_VELOCITY;
-                    break;
-                case WAIT_VELOCITY:
-                    // Update last received time (signal present)
-                    lastReceivedMillis = millis();
-                    signalPresent = true;
-
-                    if ((midiStatus & 0xF0) == 0x90 && byte > 0) {
-                        // Note ON
-                        uint32_t t = millis();
-                        if (t == 0) t = 1; // avoid 0 sentinel
-                        noteOnTime[midiNote] = t;
-                        currentPlayingNote = midiNote;
-                        currentVelocityVal = byte;
-                        currentNoteStart = noteOnTime[midiNote];
-                        Serial.printf("Signal: true | Note: %s (%d) | Velocity: %d | State: ON\n", midiNoteToName(midiNote), midiNote, currentVelocityVal);
-                    } else if (((midiStatus & 0xF0) == 0x80) || ((midiStatus & 0xF0) == 0x90 && byte == 0)) {
-                        // Note OFF
-                        uint32_t now = millis();
-                        uint32_t duration = 0;
-                        if (noteOnTime[midiNote] != 0) {
-                            duration = now - noteOnTime[midiNote];
-                            if (duration == 0) duration = 1; // ensure non-zero for very short holds
-                        }
-                        Serial.printf("Signal: true | Note: %s (%d) | Velocity: %d | State: OFF | Duration: %lu ms\n", midiNoteToName(midiNote), midiNote, (unsigned)byte, duration);
-                        // Only send if we had a prior note-on recorded
-                        if (noteOnTime[midiNote] != 0) {
-                            sendNoteData(midiNote, duration);
-                        } else {
-                            Serial.printf("(info) Ignored OFF for note %d with no prior ON\n", midiNote);
-                        }
-                        noteOnTime[midiNote] = 0;
-                        // If the note that turned off was the currently tracked one, clear it
-                        if (currentPlayingNote == midiNote) {
-                            currentPlayingNote = -1;
-                            currentVelocityVal = 0;
-                            currentNoteStart = 0;
-                        }
-                    }
-                    midiState = WAIT_NOTE;
-                    break;
-                default:
-                    midiState = WAIT_STATUS;
-                    break;
-            }
-        }
-    }
+    processIncomingMidi();
     // Dump raw MIDI bytes occasionally for debug if any were read
     uint32_t now = millis();
     if (rawBufLen > 0 && (now - lastRawDumpMillis) >= RAW_MIDI_DUMP_MS) {
@@ -533,7 +568,7 @@ void loop() {
 #endif
 
 #if defined(ESP32)
-#if USE_BT
+#if USE_BT && ENABLE_REMOTE_TRANSPORTS
     // Check for incoming Bluetooth SPP packets (5-byte note packets)
     if (SerialBT.hasClient()) {
         while (SerialBT.available() >= 5) {
@@ -548,7 +583,7 @@ void loop() {
         }
     }
 #endif
-#if defined(ESP32)
+#if defined(ESP32) && ENABLE_REMOTE_TRANSPORTS
     // UDP receive: listen for 5-byte packets from the bridge/host
     if (transport == TM_UDP) {
         int packetSize = _udp.parsePacket();

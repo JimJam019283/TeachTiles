@@ -1,0 +1,15 @@
+[Unit]
+Description=TeachTiles MIDI Bridge
+After=multi-user.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__WORKDIR__
+ExecStart=__PYTHON__ __SCRIPT__
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

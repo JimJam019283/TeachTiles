@@ -17,6 +17,45 @@ Notes:
 - ESP-NOW requires adding the peer MAC address to the sender's peer list (the code prints a message if peer MAC is not configured).
 - UDP is simpler for local testing: both the ESP32 and your Mac must be on the same WiFi network; ensure `router_ip` is set to your Mac's IP in `main.cpp` before compiling.
 
+## Raspberry Pi MIDI Bridge
+
+If your piano connects over USB, the Raspberry Pi acts as the USB host and forwards MIDI note events to the ESP32 over the ESP32's USB serial connection.
+
+Typical wiring:
+
+- Piano USB-B -> Raspberry Pi USB host port
+- ESP32 USB -> Raspberry Pi USB port
+
+Run the bridge once interactively:
+
+```bash
+python3 scripts/midi_to_esp32.py
+```
+
+Install the always-on Raspberry Pi bridge service:
+
+```bash
+chmod +x scripts/install_midi_bridge_pi.sh
+./scripts/install_midi_bridge_pi.sh
+```
+
+One-command setup on Raspberry Pi (compile, upload, and enable bridge service):
+
+```bash
+chmod +x scripts/pi_setup_and_flash.sh
+./scripts/pi_setup_and_flash.sh
+```
+
+Useful service commands:
+
+```bash
+sudo systemctl status teachtiles-midi-bridge.service
+sudo journalctl -u teachtiles-midi-bridge.service -f
+sudo systemctl restart teachtiles-midi-bridge.service
+```
+
+The daemon auto-detects a USB MIDI input and an ESP32 serial port, then forwards note-on and note-off messages to the ESP32.
+
 ## Homebrew dependencies
 
 This project uses several system packages (Arduino CLI, SDL2, RtMidi, etc.) which can be installed via Homebrew using the included `Brewfile`.
