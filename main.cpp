@@ -20,7 +20,7 @@
 
 #if defined(ESP32)
 #if !defined(ENABLE_REMOTE_TRANSPORTS)
-#define ENABLE_REMOTE_TRANSPORTS 0
+#define ENABLE_REMOTE_TRANSPORTS 1
 #endif
 #else
 #if !defined(ENABLE_REMOTE_TRANSPORTS)
@@ -186,7 +186,7 @@ const uint8_t KNOWN_MAC_B[6] = {0x4C,0xC3,0x82,0x07,0xCC,0x04}; // device seen o
 uint8_t espnow_peer_mac[6] = {0,0,0,0,0,0};
 
 // Define transport selection default (can be changed at runtime)
-TransportMode transport = TM_ESPNOW;
+TransportMode transport = TM_UDP;
 
 void onDataRecv(const esp_now_recv_info_t* info, const uint8_t *data, int len) {
     if (len < 5) return;
@@ -243,8 +243,8 @@ void initEspNow() {
 // --- Configuration ---
 // WiFi credentials and router IP (ESP32-only)
 #if defined(ESP32)
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = "TeachTiles";
+const char* password = "TeachTiles2026";
 const char* router_ip = "192.168.1.100"; // Change to your router's IP
 const uint16_t router_port __attribute__((unused)) = 5005;
 #endif
