@@ -21,3 +21,4 @@ external_libraries.disabled/
 /main
 /main.o
 /main.dSYM
+.DS_Store
